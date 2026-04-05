@@ -1,0 +1,9 @@
+node_modules/
+dist/
+data/
+.env
+*.db
+*.log
+*.pyc
+__pycache__/
+.claude/
