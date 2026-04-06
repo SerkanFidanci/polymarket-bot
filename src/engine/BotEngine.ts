@@ -172,10 +172,10 @@ function startServerDataPoll(store: StateUpdater) {
     } catch { /* silent */ }
   };
 
-  // Poll every 10 seconds for round count updates from server
+  // Poll every 5 seconds for round count updates from server
   poll();
   if (serverPollInterval) clearInterval(serverPollInterval);
-  serverPollInterval = setInterval(poll, 10000);
+  serverPollInterval = setInterval(poll, 5000);
 }
 
 export function stopBot(): void {
