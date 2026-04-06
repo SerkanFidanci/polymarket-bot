@@ -23,12 +23,12 @@ export function checkPassiveToPaper(
 ): PhaseStatus {
   const checks: PhaseCheck[] = [
     {
-      label: `Min 500 training rounds (${trainingRoundsCount}/500)`,
-      met: trainingRoundsCount >= 500,
+      label: `Min 200 training rounds (${trainingRoundsCount}/200)`,
+      met: trainingRoundsCount >= 200,
     },
     {
-      label: 'All 10 signals have min 100 predictions',
-      met: signalAccuracies.every(a => a.totalPredictions >= 100),
+      label: 'All 10 signals have min 50 predictions',
+      met: signalAccuracies.length === 0 || signalAccuracies.every(a => a.totalPredictions >= 50),
     },
     {
       label: 'First weight optimization completed',

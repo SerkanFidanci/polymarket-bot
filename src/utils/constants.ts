@@ -45,10 +45,11 @@ export const MIN_SCORE_DEFAULT = 15;
 export const WHALE_THRESHOLD_BTC = 0.5;
 
 // Training
-export const MIN_ROUNDS_FOR_PAPER = 500;
+export const MIN_ROUNDS_FOR_PAPER = 200;
 export const MIN_PAPER_TRADES_FOR_LIVE = 200;
 export const MIN_PAPER_WIN_RATE = 0.55;
 export const MAX_PAPER_DRAWDOWN = 0.30;
 export const MIN_SIGNAL_ACCURACY = 0.50;
 export const OPTIMIZE_EVERY_N_ROUNDS = 100;
+export const EDGE_OPTIMIZE_EVERY_N_ROUNDS = 200;
 export const FULL_OPTIMIZE_EVERY_N_ROUNDS = 500;

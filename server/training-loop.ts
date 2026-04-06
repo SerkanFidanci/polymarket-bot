@@ -112,10 +112,14 @@ function onRoundRecorded() {
     runAccuracyCheck().catch(err => console.error('[TrainingLoop] Accuracy check error:', err));
   }
 
-  // Every 500 rounds: full optimization
-  if (roundsSinceLastOptimize >= 500) {
-    roundsSinceLastOptimize = 0;
+  // Every 200 rounds: edge-based optimization (or full at 500)
+  if (roundsSinceLastOptimize >= 200) {
     runFullOptimization().catch(err => console.error('[TrainingLoop] Optimization error:', err));
+    // Don't reset counter — let it accumulate to 500 for grid search
+    // runOptimizationCycle checks roundsSinceLastOptimize internally
+    if (roundsSinceLastOptimize >= 500) {
+      roundsSinceLastOptimize = 0;
+    }
   }
 }
 

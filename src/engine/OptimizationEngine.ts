@@ -392,14 +392,53 @@ export async function runOptimizationCycle(
     }
   }
 
-  // Full optimization only every 500 rounds
-  if (roundsSinceLastOptimize < 500 || rounds.length < 100) {
+  // Not enough data yet
+  if (rounds.length < 100) {
     return {
       accuracies,
       proposedWeights: retirement.changes.length > 0 ? retirement.weights : null,
       thresholds: null,
       applied: retirement.changes.length > 0,
-      reason: retirement.changes.length > 0 ? 'Signal retirement applied' : 'Not enough rounds since last optimization',
+      reason: retirement.changes.length > 0 ? 'Signal retirement applied' : 'Not enough rounds for optimization',
+    };
+  }
+
+  // Edge-based optimization at 200+ rounds
+  if (roundsSinceLastOptimize >= 200 && roundsSinceLastOptimize < 500) {
+    logger.info('Optimization', `Running edge-based optimization on ${rounds.length} rounds...`);
+    const edgeWeights = optimizeWeightsByEdge(rounds);
+    const gradualWeights = applyGradualUpdate(currentWeights, edgeWeights);
+
+    const currentResult = simulateWithWeights(rounds, currentWeights);
+    const newResult = simulateWithWeights(rounds, gradualWeights);
+
+    if (newResult.pnl >= currentResult.pnl) {
+      return {
+        accuracies,
+        proposedWeights: gradualWeights,
+        thresholds: null,
+        applied: true,
+        reason: `Edge-based optimization (${rounds.length} rounds)`,
+      };
+    }
+
+    return {
+      accuracies,
+      proposedWeights: null,
+      thresholds: null,
+      applied: false,
+      reason: `Edge-based: no improvement (current: $${currentResult.pnl.toFixed(2)}, proposed: $${newResult.pnl.toFixed(2)})`,
+    };
+  }
+
+  // Full grid search at 500+ rounds
+  if (roundsSinceLastOptimize < 500) {
+    return {
+      accuracies,
+      proposedWeights: retirement.changes.length > 0 ? retirement.weights : null,
+      thresholds: null,
+      applied: retirement.changes.length > 0,
+      reason: retirement.changes.length > 0 ? 'Signal retirement applied' : 'Waiting for 500 rounds for full optimization',
     };
   }
 
