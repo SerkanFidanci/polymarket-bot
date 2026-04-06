@@ -23,7 +23,7 @@ export function PolymarketPanel() {
   const [timeLeft, setTimeLeft] = useState(0);
   const [searching, setSearching] = useState(true);
   const [apiConnected, setApiConnected] = useState(false);
-  const [lastResult] = useState<('W' | 'L' | '-')[]>(['-', '-', '-', '-', '-']);
+  const [lastResults, setLastResults] = useState<('W' | 'L' | '-')[]>(['-', '-', '-', '-', '-']);
 
   // Fetch current round (only update metadata, not prices — prices come from CLOB)
   const fetchRound = useCallback(async () => {
@@ -71,12 +71,33 @@ export function PolymarketPanel() {
     }
   }, [round?.slug, round?.priceUp, round?.priceDown, round?.acceptingOrders]);
 
-  // Check API status
+  // Check API status + fetch last 5 round results
   useEffect(() => {
     fetch('/api/polymarket/status')
       .then(r => r.json())
       .then((d: { configured: boolean }) => setApiConnected(d.configured))
       .catch(() => {});
+
+    const fetchResults = async () => {
+      try {
+        const res = await fetch('/api/training-rounds/recent');
+        if (res.ok) {
+          const rows = await res.json() as Array<{ actual_result: string; hypothetical_decision: string }>;
+          // Rows are DESC — reverse to show oldest first
+          const results = rows.reverse().map(r => {
+            if (r.hypothetical_decision === 'SKIP') return '-' as const;
+            const dir = r.hypothetical_decision === 'BUY_UP' ? 'UP' : 'DOWN';
+            return dir === r.actual_result ? 'W' as const : 'L' as const;
+          });
+          // Pad to 5
+          while (results.length < 5) results.unshift('-' as const);
+          setLastResults(results.slice(-5));
+        }
+      } catch { /* silent */ }
+    };
+    fetchResults();
+    const interval = setInterval(fetchResults, 10000);
+    return () => clearInterval(interval);
   }, []);
 
   // Poll for round every 5s
@@ -211,7 +232,7 @@ export function PolymarketPanel() {
       <div>
         <div className="text-[10px] text-[var(--color-text-dim)] mb-1">Last 5 Rounds</div>
         <div className="flex gap-1">
-          {lastResult.map((r, i) => (
+          {lastResults.map((r, i) => (
             <div
               key={i}
               className={`flex-1 h-6 rounded text-[10px] mono font-bold flex items-center justify-center ${

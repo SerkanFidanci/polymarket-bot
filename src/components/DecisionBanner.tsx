@@ -1,7 +1,32 @@
+import { useState, useEffect } from 'react';
 import { useStore } from '../store/useStore';
+
+interface LastTrade {
+  id: number;
+  hypothetical_decision: string;
+  actual_result: string;
+  hypothetical_pnl: number;
+  round_start_time: string;
+}
 
 export function DecisionBanner() {
   const { lastDecision, systemStatus } = useStore();
+  const [lastTrade, setLastTrade] = useState<LastTrade | null>(null);
+
+  useEffect(() => {
+    const fetchLastTrade = async () => {
+      try {
+        const res = await fetch('/api/training-rounds/trades');
+        if (res.ok) {
+          const trades = await res.json() as LastTrade[];
+          if (trades.length > 0) setLastTrade(trades[0]!);
+        }
+      } catch { /* silent */ }
+    };
+    fetchLastTrade();
+    const interval = setInterval(fetchLastTrade, 10000);
+    return () => clearInterval(interval);
+  }, []);
 
   if (systemStatus === 'WARMING_UP') {
     return (
@@ -31,6 +56,9 @@ export function DecisionBanner() {
   const { action, direction, betSize, ev, confidence, ourProbability, kellyFraction, reason } = lastDecision;
 
   if (action === 'SKIP' || action === 'STOP') {
+    const lastTradeDir = lastTrade?.hypothetical_decision === 'BUY_UP' ? 'UP' : 'DOWN';
+    const lastTradeWon = lastTrade ? lastTradeDir === lastTrade.actual_result : false;
+
     return (
       <div className="bg-[var(--color-surface)] border border-[var(--color-border)] rounded-lg p-4">
         <div className="flex items-center justify-between">
@@ -38,6 +66,16 @@ export function DecisionBanner() {
             <div className={`w-3 h-3 rounded-full ${action === 'STOP' ? 'bg-[#ef5350]' : 'bg-[#ffd54f]'}`} />
             <div className={`text-xl font-bold mono ${action === 'STOP' ? 'text-[#ef5350]' : 'text-[#ffd54f]'}`}>{action}</div>
           </div>
+          {lastTrade && (
+            <div className="text-[10px] mono text-[var(--color-text-dim)]">
+              Last: <span className={lastTradeDir === 'UP' ? 'text-[#26a69a]' : 'text-[#ef5350]'}>{lastTrade.hypothetical_decision.replace('BUY_', '')}</span>
+              {' '}#{lastTrade.id}
+              {' '}<span className={lastTradeWon ? 'text-[#26a69a]' : 'text-[#ef5350]'}>{lastTradeWon ? 'WIN' : 'LOSS'}</span>
+              {' '}<span className={(lastTrade.hypothetical_pnl || 0) >= 0 ? 'text-[#26a69a]' : 'text-[#ef5350]'}>
+                {(lastTrade.hypothetical_pnl || 0) >= 0 ? '+' : ''}${(lastTrade.hypothetical_pnl || 0).toFixed(2)}
+              </span>
+            </div>
+          )}
         </div>
         <div className="text-xs text-[var(--color-text-dim)] mt-2 mono">{reason}</div>
       </div>

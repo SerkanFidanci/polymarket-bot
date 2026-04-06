@@ -159,6 +159,36 @@ app.post('/api/training-rounds/reset', (_req, res) => {
   }
 });
 
+// Hypothetical trades (BUY only, not SKIP)
+app.get('/api/training-rounds/trades', (_req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT id, round_start_time, actual_result, hypothetical_decision,
+             hypothetical_ev, hypothetical_pnl, hypothetical_bet_size,
+             confidence, final_score, polymarket_up_price, polymarket_down_price
+      FROM training_rounds
+      WHERE hypothetical_decision != 'SKIP'
+      ORDER BY id DESC LIMIT 50
+    `).all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Last N round results (for PolymarketPanel)
+app.get('/api/training-rounds/recent', (_req, res) => {
+  try {
+    const rows = db.prepare(`
+      SELECT id, actual_result, hypothetical_decision
+      FROM training_rounds ORDER BY id DESC LIMIT 5
+    `).all();
+    res.json(rows);
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 app.get('/api/training-rounds/count', (_req, res) => {
   try {
     const row = db.prepare('SELECT COUNT(*) as count FROM training_rounds').get() as { count: number };
