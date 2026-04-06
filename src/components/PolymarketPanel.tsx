@@ -32,7 +32,8 @@ export function PolymarketPanel() {
       if (!res.ok) return;
       const data = await res.json();
       if (data.found === false) {
-        setRound(null);
+        // Don't clear round immediately — keep showing old round as "ENDED"
+        // until new round is found (Gamma API can take 1-4 min to publish)
         setSearching(true);
       } else {
         setSearching(false);
@@ -44,7 +45,7 @@ export function PolymarketPanel() {
         });
       }
     } catch {
-      setSearching(true);
+      // Don't clear round on network error
     }
   }, []);
 
@@ -75,12 +76,12 @@ export function PolymarketPanel() {
       .catch(() => {});
   }, []);
 
-  // Poll for round every 5s (rounds change every 5 minutes)
+  // Poll for round — faster when searching for next round
   useEffect(() => {
     fetchRound();
-    const interval = setInterval(fetchRound, 5000);
+    const interval = setInterval(fetchRound, searching ? 3000 : 5000);
     return () => clearInterval(interval);
-  }, [fetchRound]);
+  }, [fetchRound, searching]);
 
   // Countdown timer
   useEffect(() => {
@@ -88,12 +89,10 @@ export function PolymarketPanel() {
       if (round) {
         const left = Math.max(0, Math.floor((round.endTime - Date.now()) / 1000));
         setTimeLeft(left);
-        // Round ended — fetch next
-        if (left === 0) fetchRound();
       }
     }, 1000);
     return () => clearInterval(interval);
-  }, [round, fetchRound]);
+  }, [round]);
 
   // Refresh prices every 3s via CLOB order book (real-time)
   useEffect(() => {
@@ -139,10 +138,17 @@ export function PolymarketPanel() {
         </span>
       </div>
 
-      {/* Searching state */}
-      {searching && (
+      {/* Searching state — only show when no round at all */}
+      {searching && !round && (
         <div className="text-center py-3">
           <div className="text-[#ffd54f] text-xs animate-pulse">Searching for active BTC 5-min market...</div>
+        </div>
+      )}
+
+      {/* Between rounds — old round ended, waiting for Gamma API to publish next */}
+      {searching && round && timeLeft === 0 && (
+        <div className="text-center py-1">
+          <div className="text-[#ffd54f] text-[10px] animate-pulse">Waiting for next round from Polymarket...</div>
         </div>
       )}
 
