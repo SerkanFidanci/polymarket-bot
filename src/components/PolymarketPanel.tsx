@@ -76,12 +76,15 @@ export function PolymarketPanel() {
       .catch(() => {});
   }, []);
 
-  // Poll for round — faster when searching for next round
+  // Timer 0 = round ended, need faster polling for next round
+  const roundEnded = round !== null && timeLeft === 0;
+
+  // Poll for round — faster when round ended or searching
   useEffect(() => {
     fetchRound();
-    const interval = setInterval(fetchRound, searching ? 3000 : 5000);
+    const interval = setInterval(fetchRound, (searching || roundEnded) ? 2000 : 5000);
     return () => clearInterval(interval);
-  }, [fetchRound, searching]);
+  }, [fetchRound, searching, roundEnded]);
 
   // Countdown timer
   useEffect(() => {
