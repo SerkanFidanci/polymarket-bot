@@ -150,13 +150,15 @@ let currentTokenIdUp = '';
 let currentTokenIdDown = '';
 let roundStartPrice = 0;
 let roundUpPrice = 0;        // Updates during round (for live display)
-let roundUpPriceAtStart = 0; // Snapshot at round start (for hypothetical decision)
+let roundUpPriceAtStart = 0; // Snapshot prices (for hypothetical decision)
 let roundDownPriceAtStart = 0;
 let roundFeeRate = 0;
 let roundSpread = 0;
 let roundDownPrice = 0;
 let roundStartTime = '';
 let startSignalSnapshot: CombinedSignal | null = null;
+let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+let snapshotTaken = false;
 
 
 function saveRound(roundData: Record<string, unknown>): number | null {
@@ -222,8 +224,11 @@ async function pollRound(): Promise<void> {
 
     // NEW ROUND detected — save previous round's result and start tracking new one
     if (round.slug !== currentSlug) {
-      // Save previous round (if we had one)
-      if (currentSlug && roundStartPrice > 0 && startSignalSnapshot) {
+      // Clear snapshot timer from previous round
+      if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
+
+      // Save previous round (if we had one and snapshot was taken)
+      if (currentSlug && roundStartPrice > 0 && startSignalSnapshot && snapshotTaken) {
         const endPrice = serverBinanceWS.lastTradePrice;
 
         // Determine result from Polymarket prices
@@ -278,8 +283,8 @@ async function pollRound(): Promise<void> {
           btcPriceStart: roundStartPrice,
           btcPriceEnd: endPrice,
           actualResult: result,
-          polymarketUpPrice: roundUpPrice,
-          polymarketDownPrice: roundDownPrice,
+          polymarketUpPrice: roundUpPriceAtStart,
+          polymarketDownPrice: roundDownPriceAtStart,
           signalOrderbook: startSignalSnapshot.signals.orderbook?.score ?? 0,
           signalEmaMacd: startSignalSnapshot.signals.ema_macd?.score ?? 0,
           signalRsiStoch: startSignalSnapshot.signals.rsi_stoch?.score ?? 0,
@@ -314,9 +319,10 @@ async function pollRound(): Promise<void> {
       const nowMs = Date.now();
       const roundLateBy = (nowMs - round.startTime) / 1000;
 
-      // PM2 restart guard: if we're >60s into this round, skip it
-      if (roundLateBy > 60) {
-        console.log(`[TrainingLoop] Skipping round ${round.slug} — joined ${roundLateBy.toFixed(0)}s late (>60s threshold)`);
+      // PM2 restart guard: if we're >120s into this round, skip it
+      // (snapshot is taken at 60s, so allow joining up to 120s late)
+      if (roundLateBy > 120) {
+        console.log(`[TrainingLoop] Skipping round ${round.slug} — joined ${roundLateBy.toFixed(0)}s late (>120s threshold)`);
         currentSlug = round.slug; // mark as seen so we don't re-process
         startSignalSnapshot = null; // no snapshot = won't save this round
         return;
@@ -328,15 +334,29 @@ async function pollRound(): Promise<void> {
       roundStartPrice = serverBinanceWS.lastTradePrice;
       roundUpPrice = round.priceUp;
       roundDownPrice = round.priceDown;
-      // Snapshot prices at round start — for hypothetical decision calc
-      // (roundUpPrice/roundDownPrice get updated during round via CLOB poll)
       roundUpPriceAtStart = round.priceUp;
       roundDownPriceAtStart = round.priceDown;
-      // Use PM window start, not polling detection time
       roundStartTime = new Date(round.startTime).toISOString();
-      startSignalSnapshot = serverSignalEngine.getLastSignal();
 
-      // Calculate fee from price, fetch spread
+      // Delayed snapshot: take signal snapshot at 60s into the round (ideal entry window)
+      // instead of at round start when signals are often weak
+      startSignalSnapshot = null;
+      snapshotTaken = false;
+      if (snapshotTimer) clearTimeout(snapshotTimer);
+
+      const delayMs = Math.max(0, 60000 - (roundLateBy * 1000)); // 60s minus how late we joined
+      snapshotTimer = setTimeout(() => {
+        startSignalSnapshot = serverSignalEngine.getLastSignal();
+        snapshotTaken = true;
+        // Snapshot PM prices and fee at this moment (not resolved end prices)
+        roundUpPriceAtStart = roundUpPrice;
+        roundDownPriceAtStart = roundDownPrice;
+        roundFeeRate = polymarketClient.calculateFee(roundUpPrice);
+        const snap = startSignalSnapshot;
+        console.log(`[TrainingLoop] Snapshot @60s: Score:${snap?.finalScore?.toFixed(1)} Conf:${snap?.confidence?.toFixed(1)} | PM Up:${(roundUpPriceAtStart * 100).toFixed(1)}¢ Down:${(roundDownPriceAtStart * 100).toFixed(1)}¢ Fee:${(roundFeeRate*100).toFixed(1)}%`);
+      }, delayMs);
+
+      // Initial fee from round start price
       roundFeeRate = polymarketClient.calculateFee(round.priceUp);
       roundSpread = 0.02; // default
       try {
