@@ -128,7 +128,9 @@ let currentSlug = '';
 let currentTokenIdUp = '';
 let currentTokenIdDown = '';
 let roundStartPrice = 0;
-let roundUpPrice = 0;
+let roundUpPrice = 0;        // Updates during round (for live display)
+let roundUpPriceAtStart = 0; // Snapshot at round start (for hypothetical decision)
+let roundDownPriceAtStart = 0;
 let roundFeeRate = 0;
 let roundSpread = 0;
 let roundDownPrice = 0;
@@ -229,7 +231,8 @@ async function pollRound(): Promise<void> {
         if (Math.abs(score) > 15 && conf > 20 && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
           const dir = score > 0 ? 'UP' : 'DOWN';
-          const price = dir === 'UP' ? roundUpPrice : roundDownPrice;
+          // Use START prices for decision, not resolved end prices
+          const price = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
           const winAmt = 1 - price;
           const loseAmt = price;
           const ourProb = Math.min(0.85, 0.5 + Math.abs(score) / 200);
@@ -304,6 +307,10 @@ async function pollRound(): Promise<void> {
       roundStartPrice = serverBinanceWS.lastTradePrice;
       roundUpPrice = round.priceUp;
       roundDownPrice = round.priceDown;
+      // Snapshot prices at round start — for hypothetical decision calc
+      // (roundUpPrice/roundDownPrice get updated during round via CLOB poll)
+      roundUpPriceAtStart = round.priceUp;
+      roundDownPriceAtStart = round.priceDown;
       // Use PM window start, not polling detection time
       roundStartTime = new Date(round.startTime).toISOString();
       startSignalSnapshot = serverSignalEngine.getLastSignal();
