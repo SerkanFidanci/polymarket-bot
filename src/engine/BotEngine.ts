@@ -163,12 +163,11 @@ export async function startBot(store: StateUpdater): Promise<void> {
 function startServerDataPoll(store: StateUpdater) {
   const poll = async () => {
     try {
-      const res = await fetch('/api/live-data');
+      // Always read count directly from DB endpoint — single source of truth
+      const res = await fetch('/api/training-rounds/count');
       if (res.ok) {
-        const data = await res.json() as {
-          training: { roundCount: number };
-        };
-        store.setTrainingRoundsCount(data.training.roundCount);
+        const data = await res.json() as { count: number };
+        store.setTrainingRoundsCount(data.count);
       }
     } catch { /* silent */ }
   };

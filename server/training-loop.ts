@@ -244,9 +244,13 @@ async function pollRound(): Promise<void> {
           }
         }
 
+        // End time = start + 5 minutes (PM window), not detection time
+        const startMs = new Date(roundStartTime).getTime();
+        const roundEndTimeFixed = new Date(startMs + 300000).toISOString();
+
         const roundData = {
           roundStartTime,
-          roundEndTime: new Date().toISOString(),
+          roundEndTime: roundEndTimeFixed,
           btcPriceStart: roundStartPrice,
           btcPriceEnd: endPrice,
           actualResult: result,
@@ -282,14 +286,26 @@ async function pollRound(): Promise<void> {
         }
       }
 
-      // Start tracking new round
+      // Start tracking new round — use PM window timestamp, not detection time
+      const nowMs = Date.now();
+      const roundLateBy = (nowMs - round.startTime) / 1000;
+
+      // PM2 restart guard: if we're >60s into this round, skip it
+      if (roundLateBy > 60) {
+        console.log(`[TrainingLoop] Skipping round ${round.slug} — joined ${roundLateBy.toFixed(0)}s late (>60s threshold)`);
+        currentSlug = round.slug; // mark as seen so we don't re-process
+        startSignalSnapshot = null; // no snapshot = won't save this round
+        return;
+      }
+
       currentSlug = round.slug;
       currentTokenIdUp = round.tokenIdUp;
       currentTokenIdDown = round.tokenIdDown;
       roundStartPrice = serverBinanceWS.lastTradePrice;
       roundUpPrice = round.priceUp;
       roundDownPrice = round.priceDown;
-      roundStartTime = new Date().toISOString();
+      // Use PM window start, not polling detection time
+      roundStartTime = new Date(round.startTime).toISOString();
       startSignalSnapshot = serverSignalEngine.getLastSignal();
 
       // Calculate fee from price, fetch spread
@@ -299,7 +315,7 @@ async function pollRound(): Promise<void> {
         roundSpread = await polymarketClient.getSpread(round.tokenIdUp, round.tokenIdDown);
       } catch { /* use default */ }
 
-      console.log(`[TrainingLoop] Tracking: ${round.title} | Up:${(roundUpPrice * 100).toFixed(1)}¢ Down:${(roundDownPrice * 100).toFixed(1)}¢ | Fee:${(roundFeeRate * 100).toFixed(1)}% Spread:${(roundSpread * 100).toFixed(1)}¢`);
+      console.log(`[TrainingLoop] Tracking: ${round.title} | Up:${(roundUpPrice * 100).toFixed(1)}¢ Down:${(roundDownPrice * 100).toFixed(1)}¢ | Fee:${(roundFeeRate * 100).toFixed(1)}% Spread:${(roundSpread * 100).toFixed(1)}¢ | Late:${roundLateBy.toFixed(0)}s`);
     } else {
       // Same round — update prices from CLOB midpoint
       if (round.tokenIdUp && round.tokenIdDown) {
