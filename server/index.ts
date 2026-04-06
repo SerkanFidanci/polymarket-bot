@@ -49,6 +49,27 @@ app.get('/api/live-data', (_req, res) => {
   }
 });
 
+// Manual accuracy check trigger
+app.post('/api/training/accuracy-check', async (_req, res) => {
+  try {
+    await serverTrainingLoop.runAccuracyNow();
+    const accuracies = serverTrainingLoop.getLastAccuracies();
+    res.json({ ok: true, accuracies });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Manual optimization trigger
+app.post('/api/training/optimize', async (_req, res) => {
+  try {
+    await serverTrainingLoop.runOptimizationNow();
+    res.json({ ok: true, weights: serverSignalEngine.getWeights() });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // System state
 app.get('/api/state', (_req, res) => {
   try {

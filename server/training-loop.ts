@@ -3,6 +3,8 @@ import { serverSignalEngine } from './signal-engine.js';
 import { polymarketClient } from './polymarket/client.js';
 import { db } from './db/sqlite.js';
 import type { CombinedSignal } from '../src/types/index.js';
+import { measureAllSignalAccuracy, runOptimizationCycle } from '../src/engine/OptimizationEngine.js';
+import type { SignalAccuracy } from '../src/types/signals.js';
 
 let trainingInterval: ReturnType<typeof setInterval> | null = null;
 let roundCounter = getRoundCountFromDB();
@@ -13,6 +15,107 @@ function getRoundCountFromDB(): number {
     return row.count;
   } catch {
     return 0;
+  }
+}
+
+// Training state
+let roundsSinceLastAccuracyCheck = 0;
+let roundsSinceLastOptimize = 0;
+let lastAccuracies: SignalAccuracy[] = [];
+
+function getAllTrainingRounds(): unknown[] {
+  return db.prepare('SELECT * FROM training_rounds ORDER BY id ASC').all();
+}
+
+function logAccuracyToDB(accuracies: SignalAccuracy[]) {
+  const weights = serverSignalEngine.getWeights();
+  const stmt = db.prepare(`
+    INSERT INTO signal_accuracy_log (timestamp, signal_name, period_rounds, accuracy, edge_over_random, abstain_rate, current_weight, status)
+    VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?)
+  `);
+  for (const a of accuracies) {
+    stmt.run(
+      a.signalName,
+      a.totalPredictions + Math.round(a.abstainRate * a.totalPredictions / (1 - a.abstainRate || 1)),
+      a.accuracy, a.edgeOverRandom, a.abstainRate,
+      weights[a.signalName], a.status
+    );
+  }
+}
+
+function logOptimizationToDB(
+  type: string, roundsAnalyzed: number,
+  oldWeights: string, newWeights: string,
+  oldPnl: number, newPnl: number,
+  improvement: number, applied: boolean, reason: string
+) {
+  db.prepare(`
+    INSERT INTO optimization_history (timestamp, optimization_type, rounds_analyzed, old_weights, new_weights, old_simulated_pnl, new_simulated_pnl, improvement_percent, applied, reason)
+    VALUES (datetime('now'), ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(type, roundsAnalyzed, oldWeights, newWeights, oldPnl, newPnl, improvement, applied ? 1 : 0, reason);
+}
+
+async function runAccuracyCheck() {
+  const rounds = getAllTrainingRounds();
+  if (rounds.length < 20) return;
+
+  const currentWeights = serverSignalEngine.getWeights();
+  const accuracies = measureAllSignalAccuracy(rounds as Parameters<typeof measureAllSignalAccuracy>[0]);
+  lastAccuracies = accuracies;
+
+  logAccuracyToDB(accuracies);
+
+  console.log(`[TrainingLoop] Accuracy check (${rounds.length} rounds): ${accuracies.map(a => `${a.signalName}:${(a.accuracy * 100).toFixed(1)}%`).join(', ')}`);
+}
+
+async function runFullOptimization() {
+  const rounds = getAllTrainingRounds();
+  if (rounds.length < 100) return;
+
+  const currentWeights = serverSignalEngine.getWeights();
+
+  const result = await runOptimizationCycle(
+    rounds as Parameters<typeof runOptimizationCycle>[0],
+    currentWeights,
+    roundsSinceLastOptimize
+  );
+
+  lastAccuracies = result.accuracies;
+
+  if (result.proposedWeights && result.applied) {
+    serverSignalEngine.setWeights(result.proposedWeights);
+
+    logOptimizationToDB(
+      'weights', rounds.length,
+      JSON.stringify(currentWeights), JSON.stringify(result.proposedWeights),
+      0, 0, 0, true, result.reason
+    );
+
+    console.log(`[TrainingLoop] Weights updated: ${result.reason}`);
+  } else {
+    logOptimizationToDB(
+      'weights', rounds.length,
+      JSON.stringify(currentWeights), JSON.stringify(currentWeights),
+      0, 0, 0, false, result.reason
+    );
+    console.log(`[TrainingLoop] Optimization: ${result.reason}`);
+  }
+}
+
+function onRoundRecorded() {
+  roundsSinceLastAccuracyCheck++;
+  roundsSinceLastOptimize++;
+
+  // Every 100 rounds: measure accuracy
+  if (roundsSinceLastAccuracyCheck >= 100) {
+    roundsSinceLastAccuracyCheck = 0;
+    runAccuracyCheck().catch(err => console.error('[TrainingLoop] Accuracy check error:', err));
+  }
+
+  // Every 500 rounds: full optimization
+  if (roundsSinceLastOptimize >= 500) {
+    roundsSinceLastOptimize = 0;
+    runFullOptimization().catch(err => console.error('[TrainingLoop] Optimization error:', err));
   }
 }
 
@@ -146,6 +249,9 @@ async function pollRound(): Promise<void> {
         if (savedId) {
           roundCounter++;
           console.log(`[TrainingLoop] Round #${roundCounter}: ${result} | BTC ${roundStartPrice.toFixed(0)}→${endPrice.toFixed(0)} | PM Up:${(roundUpPrice * 100).toFixed(0)}¢ Down:${(roundDownPrice * 100).toFixed(0)}¢ | Score:${score.toFixed(1)} Conf:${conf.toFixed(1)} → ${hypDecision}`);
+
+          // Trigger accuracy check / optimization
+          onRoundRecorded();
         }
       }
 
@@ -191,7 +297,25 @@ export const serverTrainingLoop = {
       roundStartTime,
       roundCounter,
       hasSignalSnapshot: !!startSignalSnapshot,
+      roundsSinceLastAccuracyCheck,
+      roundsSinceLastOptimize,
     };
+  },
+
+  getLastAccuracies(): SignalAccuracy[] {
+    return [...lastAccuracies];
+  },
+
+  // Manual trigger for accuracy check
+  async runAccuracyNow(): Promise<void> {
+    roundsSinceLastAccuracyCheck = 0;
+    await runAccuracyCheck();
+  },
+
+  // Manual trigger for full optimization
+  async runOptimizationNow(): Promise<void> {
+    roundsSinceLastOptimize = 0;
+    await runFullOptimization();
   },
 
   async start(): Promise<void> {
