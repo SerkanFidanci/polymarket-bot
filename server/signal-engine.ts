@@ -1,5 +1,6 @@
 import { serverBinanceWS } from './binance-ws.js';
 import { serverStreamManager } from './stream-manager.js';
+import { db } from './db/sqlite.js';
 import type { SignalResult, SignalName, CombinedSignal, SignalWeights, FuturesData } from '../src/types/index.js';
 import { DEFAULT_WEIGHTS, SIGNAL_GROUPS } from '../src/types/signals.js';
 import { sign } from '../src/utils/math.js';
@@ -15,7 +16,21 @@ import { calculateOpenInterestSignal } from '../src/engine/signals/OpenInterestS
 import { calculateLiquidationSignal } from '../src/engine/signals/LiquidationSignal.js';
 import { calculateLsRatioSignal } from '../src/engine/signals/LsRatioSignal.js';
 
-let currentWeights: SignalWeights = { ...DEFAULT_WEIGHTS };
+// Load weights from DB (last applied optimization), fallback to defaults
+function loadWeightsFromDB(): SignalWeights {
+  try {
+    const row = db.prepare('SELECT new_weights FROM optimization_history WHERE applied = 1 ORDER BY id DESC LIMIT 1').get() as { new_weights: string } | undefined;
+    if (row) {
+      const parsed = JSON.parse(row.new_weights) as SignalWeights;
+      console.log('[ServerSignalEngine] Loaded optimized weights from DB');
+      return parsed;
+    }
+  } catch { /* fallback */ }
+  console.log('[ServerSignalEngine] Using default weights');
+  return { ...DEFAULT_WEIGHTS };
+}
+
+let currentWeights: SignalWeights = loadWeightsFromDB();
 let lastCombined: CombinedSignal | null = null;
 let priceHistory5m: number[] = [];
 let calcInterval: ReturnType<typeof setInterval> | null = null;

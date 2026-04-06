@@ -24,9 +24,15 @@ app.get('/api/live-data', (_req, res) => {
   try {
     const signal = serverSignalEngine.getLastSignal();
     const tracking = serverTrainingLoop.getTrackingState();
+    // Read trading mode from DB
+    const modeRow = db.prepare("SELECT value FROM system_state WHERE key = 'trading_mode'").get() as { value: string } | undefined;
+    const tradingMode = modeRow?.value ?? 'passive';
+
     res.json({
       btcPrice: serverBinanceWS.lastTradePrice,
       isConnected: serverBinanceWS.isConnected,
+      tradingMode,
+      weights: serverSignalEngine.getWeights(),
       signal: signal ? {
         finalScore: signal.finalScore,
         confidence: signal.confidence,

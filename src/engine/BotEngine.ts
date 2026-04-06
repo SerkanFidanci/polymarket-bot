@@ -115,10 +115,7 @@ export async function startBot(store: StateUpdater): Promise<void> {
     bankrollManager.init(initialBalance);
     bankrollManager.onChange((b) => store.setBankroll(b as unknown as Record<string, unknown>));
 
-    // Detect trading mode
-    const tradingMode: 'passive' | 'paper' | 'live' = 'passive';
-    tradingLoop.setMode(tradingMode);
-    store.setTradingMode(tradingMode);
+    // Trading mode will be set from server poll (not hardcoded)
 
     // Start signal engine (every 1 second) for frontend display
     signalEngine.start(1000);
@@ -163,16 +160,32 @@ export async function startBot(store: StateUpdater): Promise<void> {
 function startServerDataPoll(store: StateUpdater) {
   const poll = async () => {
     try {
-      // Always read count directly from DB endpoint — single source of truth
-      const res = await fetch('/api/training-rounds/count');
-      if (res.ok) {
-        const data = await res.json() as { count: number };
+      // Read count from DB endpoint
+      const countRes = await fetch('/api/training-rounds/count');
+      if (countRes.ok) {
+        const data = await countRes.json() as { count: number };
         store.setTrainingRoundsCount(data.count);
+      }
+
+      // Read mode + weights from live-data endpoint
+      const liveRes = await fetch('/api/live-data');
+      if (liveRes.ok) {
+        const live = await liveRes.json() as {
+          tradingMode?: string;
+          weights?: Record<string, number>;
+        };
+        if (live.tradingMode) {
+          store.setTradingMode(live.tradingMode);
+          tradingLoop.setMode(live.tradingMode as 'passive' | 'paper' | 'live');
+        }
+        if (live.weights) {
+          store.setSignalWeights(live.weights as import('../types/signals.js').SignalWeights);
+        }
       }
     } catch { /* silent */ }
   };
 
-  // Poll every 5 seconds for round count updates from server
+  // Poll every 5 seconds
   poll();
   if (serverPollInterval) clearInterval(serverPollInterval);
   serverPollInterval = setInterval(poll, 5000);
