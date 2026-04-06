@@ -226,7 +226,7 @@ async function pollRound(): Promise<void> {
         const feeOk = roundFeeRate <= 0.03;
         const spreadOk = roundSpread <= 0.05;
 
-        if (Math.abs(score) > 15 && conf > 30 && feeOk && spreadOk) {
+        if (Math.abs(score) > 15 && conf > 20 && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
           const dir = score > 0 ? 'UP' : 'DOWN';
           const price = dir === 'UP' ? roundUpPrice : roundDownPrice;

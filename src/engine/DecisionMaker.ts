@@ -70,7 +70,7 @@ export function makeDecision(ctx: DecisionContext): Decision {
 
   // ===== DYNAMIC THRESHOLDS =====
 
-  let minConfidence = 30;
+  let minConfidence = 20;
   let minScore = 15;
 
   if (highVolatility) {
