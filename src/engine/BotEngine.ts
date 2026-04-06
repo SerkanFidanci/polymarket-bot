@@ -176,6 +176,14 @@ function startServerDataPoll(store: StateUpdater) {
   poll();
   if (serverPollInterval) clearInterval(serverPollInterval);
   serverPollInterval = setInterval(poll, 5000);
+
+  // Browsers throttle setInterval to ~1/min in background tabs.
+  // When tab becomes visible again, poll immediately.
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      poll();
+    }
+  });
 }
 
 export function stopBot(): void {
