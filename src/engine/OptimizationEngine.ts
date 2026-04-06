@@ -329,11 +329,13 @@ export function applyGradualUpdate(current: SignalWeights, proposed: SignalWeigh
 
 export function evaluateSignalRetirement(
   accuracies: SignalAccuracy[],
-  currentWeights: SignalWeights
+  currentWeights: SignalWeights,
+  totalRounds: number = 0
 ): { weights: SignalWeights; changes: string[] } {
   const weights = { ...currentWeights };
   const changes: string[] = [];
 
+  // --- Per-signal status checks ---
   for (const acc of accuracies) {
     const name = acc.signalName;
 
@@ -342,7 +344,7 @@ export function evaluateSignalRetirement(
         weights[name] = 0;
         changes.push(`${name}: DISABLED (accuracy ${(acc.accuracy * 100).toFixed(1)}% over ${acc.totalPredictions} predictions)`);
       }
-      // Check for reactivation: recent 500 rounds > 55%
+      // Check for reactivation: 500+ predictions and accuracy > 55%
       if (acc.totalPredictions >= 500 && acc.accuracy > 0.55) {
         weights[name] = 0.05;
         changes.push(`${name}: REACTIVATED (accuracy ${(acc.accuracy * 100).toFixed(1)}%)`);
@@ -351,6 +353,23 @@ export function evaluateSignalRetirement(
       if (weights[name] > 0.05) {
         weights[name] = 0.05;
         changes.push(`${name}: WARNING → weight minimized (accuracy ${(acc.accuracy * 100).toFixed(1)}%)`);
+      }
+    }
+  }
+
+  // --- Every 1000 rounds: auto-disable worst 2 signals with accuracy < 48% ---
+  if (totalRounds > 0 && totalRounds % 1000 === 0) {
+    const activeAccuracies = accuracies
+      .filter(a => weights[a.signalName] > 0 && a.totalPredictions >= 50)
+      .sort((a, b) => a.accuracy - b.accuracy);
+
+    let disabled = 0;
+    for (const acc of activeAccuracies) {
+      if (disabled >= 2) break;
+      if (acc.accuracy < 0.48) {
+        weights[acc.signalName] = 0;
+        disabled++;
+        changes.push(`${acc.signalName}: AUTO-RETIRED at round ${totalRounds} (accuracy ${(acc.accuracy * 100).toFixed(1)}%, worst performer)`);
       }
     }
   }
@@ -385,7 +404,7 @@ export async function runOptimizationCycle(
   const accuracies = measureAllSignalAccuracy(rounds);
 
   // Check signal retirement
-  const retirement = evaluateSignalRetirement(accuracies, currentWeights);
+  const retirement = evaluateSignalRetirement(accuracies, currentWeights, rounds.length);
   if (retirement.changes.length > 0) {
     for (const change of retirement.changes) {
       logger.warn('Optimization', change);

@@ -176,11 +176,29 @@ export function initDatabase(): void {
       notes TEXT
     );
 
+    -- Signal retirement log
+    CREATE TABLE IF NOT EXISTS signal_retirement_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      timestamp TEXT NOT NULL,
+      signal_name TEXT NOT NULL,
+      action TEXT NOT NULL,
+      accuracy REAL,
+      reason TEXT
+    );
+
     -- Initialize system state
     INSERT OR IGNORE INTO system_state (key, value, updated_at) VALUES ('trading_mode', 'passive', datetime('now'));
     INSERT OR IGNORE INTO system_state (key, value, updated_at) VALUES ('bankroll', '50', datetime('now'));
     INSERT OR IGNORE INTO system_state (key, value, updated_at) VALUES ('system_status', 'INITIALIZING', datetime('now'));
   `);
+
+  // Migrations — add columns if missing
+  try {
+    db.exec(`ALTER TABLE training_rounds ADD COLUMN polymarket_fee_rate REAL`);
+  } catch { /* column already exists */ }
+  try {
+    db.exec(`ALTER TABLE training_rounds ADD COLUMN orderbook_spread_at_entry REAL`);
+  } catch { /* column already exists */ }
 
   console.log('[DB] Database initialized at', DB_PATH);
 }

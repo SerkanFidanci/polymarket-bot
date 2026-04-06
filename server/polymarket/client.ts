@@ -164,6 +164,42 @@ export const polymarketClient = {
     }
   },
 
+  // Calculate fee based on price (Polymarket fee = min(price, 1-price) * 2%)
+  // Lower prices = lower fees, extreme prices = minimal fees
+  calculateFee(price: number): number {
+    const minSide = Math.min(price, 1 - price);
+    return minSide * 0.02; // 2% of the cheaper side
+  },
+
+  // Fetch spread from CLOB book — find real liquidity near midpoint
+  async getSpread(tokenIdUp: string, tokenIdDown: string): Promise<number> {
+    try {
+      // Use midpoint difference — more reliable than thin order books
+      const [upRes, downRes] = await Promise.allSettled([
+        fetch(`${CLOB_BASE}/midpoint?token_id=${tokenIdUp}`),
+        fetch(`${CLOB_BASE}/midpoint?token_id=${tokenIdDown}`),
+      ]);
+
+      let priceUp = 0.5;
+      let priceDown = 0.5;
+
+      if (upRes.status === 'fulfilled' && upRes.value.ok) {
+        const data = await upRes.value.json() as { mid: string };
+        priceUp = parseFloat(data.mid);
+      }
+      if (downRes.status === 'fulfilled' && downRes.value.ok) {
+        const data = await downRes.value.json() as { mid: string };
+        priceDown = parseFloat(data.mid);
+      }
+
+      // Implied spread = how far from perfect complement (up + down should = 1.00)
+      const spread = Math.abs((priceUp + priceDown) - 1.0);
+      return spread;
+    } catch {
+      return 0.02;
+    }
+  },
+
   // Place FOK order
   async placeOrder(tokenId: string, price: number, size: number, side: 'BUY' | 'SELL' = 'BUY'): Promise<unknown> {
     if (!isConfigured()) throw new Error('Polymarket not configured');

@@ -125,8 +125,12 @@ function onRoundRecorded() {
 
 // Round tracking state
 let currentSlug = '';
+let currentTokenIdUp = '';
+let currentTokenIdDown = '';
 let roundStartPrice = 0;
 let roundUpPrice = 0;
+let roundFeeRate = 0;
+let roundSpread = 0;
 let roundDownPrice = 0;
 let roundStartTime = '';
 let startSignalSnapshot: CombinedSignal | null = null;
@@ -150,8 +154,9 @@ function saveRound(roundData: Record<string, unknown>): number | null {
         signal_orderbook, signal_ema_macd, signal_rsi_stoch, signal_vwap_bb,
         signal_cvd, signal_whale, signal_funding, signal_open_interest,
         signal_liquidation, signal_ls_ratio, final_score, confidence,
-        hypothetical_decision, hypothetical_ev, hypothetical_bet_size, hypothetical_pnl
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        hypothetical_decision, hypothetical_ev, hypothetical_bet_size, hypothetical_pnl,
+        polymarket_fee_rate, orderbook_spread_at_entry
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -167,6 +172,7 @@ function saveRound(roundData: Record<string, unknown>): number | null {
       roundData.finalScore, roundData.confidence,
       roundData.hypotheticalDecision, roundData.hypotheticalEv,
       roundData.hypotheticalBetSize, roundData.hypotheticalPnl,
+      roundData.polymarketFeeRate ?? null, roundData.orderbookSpread ?? null,
     );
 
     return result.lastInsertRowid as number;
@@ -208,19 +214,34 @@ async function pollRound(): Promise<void> {
           result = endPrice >= roundStartPrice ? 'UP' : 'DOWN';
         }
 
-        // Calculate hypothetical decision
+        // Calculate hypothetical decision (with fee)
         const score = startSignalSnapshot.finalScore;
         const conf = startSignalSnapshot.confidence;
         let hypDecision = 'SKIP';
         let hypBetSize = 0;
         let hypPnl = 0;
-        if (Math.abs(score) > 15 && conf > 30) {
+        let hypEv = 0;
+
+        // Skip if fee > 3% or spread > 5¢
+        const feeOk = roundFeeRate <= 0.03;
+        const spreadOk = roundSpread <= 0.05;
+
+        if (Math.abs(score) > 15 && conf > 30 && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
           const dir = score > 0 ? 'UP' : 'DOWN';
           const price = dir === 'UP' ? roundUpPrice : roundDownPrice;
-          hypBetSize = Math.min(50 * 0.05, 5);
-          const won = dir === result;
-          hypPnl = won ? hypBetSize * ((1 - price) / price) : -hypBetSize;
+          const winAmt = 1 - price;
+          const loseAmt = price;
+          const ourProb = Math.min(0.85, 0.5 + Math.abs(score) / 200);
+          hypEv = (ourProb * winAmt) - ((1 - ourProb) * loseAmt) - roundFeeRate;
+
+          if (hypEv > 0) {
+            hypBetSize = Math.min(50 * 0.05, 2.5);
+            const won = dir === result;
+            hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
+          } else {
+            hypDecision = 'SKIP';
+          }
         }
 
         const roundData = {
@@ -244,9 +265,11 @@ async function pollRound(): Promise<void> {
           finalScore: startSignalSnapshot.finalScore,
           confidence: startSignalSnapshot.confidence,
           hypotheticalDecision: hypDecision,
-          hypotheticalEv: 0,
+          hypotheticalEv: hypEv,
           hypotheticalBetSize: hypBetSize,
           hypotheticalPnl: hypPnl,
+          polymarketFeeRate: roundFeeRate,
+          orderbookSpread: roundSpread,
         };
 
         const savedId = saveRound(roundData);
@@ -261,13 +284,22 @@ async function pollRound(): Promise<void> {
 
       // Start tracking new round
       currentSlug = round.slug;
+      currentTokenIdUp = round.tokenIdUp;
+      currentTokenIdDown = round.tokenIdDown;
       roundStartPrice = serverBinanceWS.lastTradePrice;
       roundUpPrice = round.priceUp;
       roundDownPrice = round.priceDown;
       roundStartTime = new Date().toISOString();
       startSignalSnapshot = serverSignalEngine.getLastSignal();
 
-      console.log(`[TrainingLoop] Tracking: ${round.title} | Up:${(roundUpPrice * 100).toFixed(1)}¢ Down:${(roundDownPrice * 100).toFixed(1)}¢`);
+      // Calculate fee from price, fetch spread
+      roundFeeRate = polymarketClient.calculateFee(round.priceUp);
+      roundSpread = 0.02; // default
+      try {
+        roundSpread = await polymarketClient.getSpread(round.tokenIdUp, round.tokenIdDown);
+      } catch { /* use default */ }
+
+      console.log(`[TrainingLoop] Tracking: ${round.title} | Up:${(roundUpPrice * 100).toFixed(1)}¢ Down:${(roundDownPrice * 100).toFixed(1)}¢ | Fee:${(roundFeeRate * 100).toFixed(1)}% Spread:${(roundSpread * 100).toFixed(1)}¢`);
     } else {
       // Same round — update prices from CLOB midpoint
       if (round.tokenIdUp && round.tokenIdDown) {
@@ -303,6 +335,8 @@ export const serverTrainingLoop = {
       hasSignalSnapshot: !!startSignalSnapshot,
       roundsSinceLastAccuracyCheck,
       roundsSinceLastOptimize,
+      feeRate: roundFeeRate,
+      spread: roundSpread,
     };
   },
 

@@ -10,14 +10,16 @@ interface DecisionContext {
   priceUp: number;
   priceDown: number;
   hasOpenPosition: boolean;
-  dataAge: number; // ms since last data
-  roundTimeRemaining: number; // seconds left in round
+  dataAge: number;
+  roundTimeRemaining: number;
   highVolatility: boolean;
   lowLiquidity: boolean;
+  feeRate?: number;   // Polymarket taker fee
+  spread?: number;    // Order book spread
 }
 
 export function makeDecision(ctx: DecisionContext): Decision {
-  const { signal, bankroll, config, priceUp, priceDown, hasOpenPosition, dataAge, roundTimeRemaining, highVolatility, lowLiquidity } = ctx;
+  const { signal, bankroll, config, priceUp, priceDown, hasOpenPosition, dataAge, roundTimeRemaining, highVolatility, lowLiquidity, feeRate, spread } = ctx;
   const now = Date.now();
 
   // ===== HARD SKIP CONDITIONS =====
@@ -53,6 +55,17 @@ export function makeDecision(ctx: DecisionContext): Decision {
   // Extreme odds filter
   if (priceUp < config.extremeOddsMin || priceUp > config.extremeOddsMax) {
     return skip(`Extreme odds (Up: ${priceUp.toFixed(2)})`, now);
+  }
+
+  // Fee filter
+  const fee = feeRate ?? 0.02;
+  if (fee > config.maxFeeRate) {
+    return skip(`Fee too high (${(fee * 100).toFixed(1)}% > ${(config.maxFeeRate * 100).toFixed(0)}%)`, now);
+  }
+
+  // Spread filter
+  if (spread !== undefined && spread > config.maxSpread) {
+    return skip(`Spread too wide (${(spread * 100).toFixed(1)}¢ > ${(config.maxSpread * 100).toFixed(0)}¢)`, now);
   }
 
   // ===== DYNAMIC THRESHOLDS =====
@@ -100,50 +113,55 @@ export function makeDecision(ctx: DecisionContext): Decision {
   const price = direction === 'UP' ? priceUp : priceDown;
   const ourProbability = clamp(0.5 + (Math.abs(signal.finalScore) / 200), 0.51, 0.85);
 
-  // ===== EV CALCULATION =====
+  // ===== EV CALCULATION (with fee) =====
 
-  const winAmount = (1 - price) * 1; // Win per $1 bet
-  const loseAmount = price * 1; // Lose per $1 bet
-  const ev = (ourProbability * winAmount) - ((1 - ourProbability) * loseAmount);
+  const winAmount = (1 - price) * 1;
+  const loseAmount = price * 1;
+  const ev = (ourProbability * winAmount) - ((1 - ourProbability) * loseAmount) - fee;
 
   if (ev <= 0) {
-    return skip(`Negative EV (${ev.toFixed(4)})`, now);
+    return skip(`Negative EV after fee (${ev.toFixed(4)}, fee: ${(fee * 100).toFixed(1)}%)`, now);
   }
 
-  // ===== KELLY CRITERION =====
+  // ===== ZONE-BASED KELLY =====
 
-  const b = winAmount / loseAmount; // Odds ratio
+  // Determine Kelly fraction based on price zone
+  let kellyBase: number;
+  if (price <= 0.25 || price >= 0.75) {
+    // Extreme zone — market is very confident, lower fee, lower risk
+    kellyBase = config.kellyFractionAggressive;
+  } else if (price >= 0.40 && price <= 0.60) {
+    // Uncertain zone — coin flip, higher fee, higher risk
+    kellyBase = config.kellyFractionConservative;
+  } else {
+    // Normal zone
+    kellyBase = config.kellyFraction;
+  }
+
+  const b = winAmount / loseAmount;
   const kelly = ((b * ourProbability) - (1 - ourProbability)) / b;
-  const halfKelly = kelly * config.kellyFraction;
+  let adjustedKelly = kelly * kellyBase;
 
   // Risk adjustments
-  let adjustedKelly = halfKelly;
-
-  // Tilt reduction
   if (bankroll.consecutiveLosses >= config.tiltLevel1) {
     adjustedKelly *= 0.5;
   }
   if (bankroll.consecutiveLosses >= config.tiltLevel2) {
-    adjustedKelly *= 0.25; // Cumulative: 0.125x
+    adjustedKelly *= 0.25;
   }
 
-  // Skip rounds after losses
   if (bankroll.consecutiveLosses >= config.tiltLevel1 && bankroll.consecutiveLosses < config.tiltLevel2) {
-    // Skip 1 round after 3 losses — we implement this as reduced size
     adjustedKelly *= 0.5;
   }
 
-  // Volatility reduction
   if (highVolatility) {
     adjustedKelly *= 0.5;
   }
 
-  // Weekend reduction
   if (isWeekendLowLiquidity()) {
     adjustedKelly *= 0.5;
   }
 
-  // Daily profit target reached — reduce size
   if (bankroll.dailyPnl > bankroll.dailyStartBalance * config.dailyProfitTarget) {
     adjustedKelly *= 0.5;
   }
@@ -152,7 +170,6 @@ export function makeDecision(ctx: DecisionContext): Decision {
   let betSize = bankroll.balance * adjustedKelly;
   betSize = clamp(betSize, config.minBet, bankroll.balance * config.maxBetPercent);
 
-  // If balance is low, allow up to 80%
   if (betSize > bankroll.balance) {
     betSize = bankroll.balance * 0.8;
   }
@@ -168,7 +185,7 @@ export function makeDecision(ctx: DecisionContext): Decision {
 
   const action: DecisionAction = direction === 'UP' ? 'BUY_UP' : 'BUY_DOWN';
 
-  logger.trade('Decision', `${action} $${betSize.toFixed(2)} @ ${price.toFixed(4)} | EV: ${ev.toFixed(4)} | Kelly: ${(adjustedKelly * 100).toFixed(1)}% | Conf: ${signal.confidence.toFixed(0)}`);
+  logger.trade('Decision', `${action} $${betSize.toFixed(2)} @ ${price.toFixed(4)} | EV: ${ev.toFixed(4)} (fee:${(fee*100).toFixed(1)}%) | Kelly: ${(adjustedKelly * 100).toFixed(1)}% (zone:${kellyBase}) | Conf: ${signal.confidence.toFixed(0)}`);
 
   return {
     action,
@@ -179,7 +196,7 @@ export function makeDecision(ctx: DecisionContext): Decision {
     score: Math.round(signal.finalScore * 100) / 100,
     ourProbability: Math.round(ourProbability * 10000) / 10000,
     kellyFraction: Math.round(adjustedKelly * 10000) / 10000,
-    reason: `${action} — EV:${ev.toFixed(3)}, Conf:${signal.confidence.toFixed(0)}, Score:${signal.finalScore.toFixed(1)}`,
+    reason: `${action} — EV:${ev.toFixed(3)}, Conf:${signal.confidence.toFixed(0)}, Score:${signal.finalScore.toFixed(1)}, Fee:${(fee*100).toFixed(1)}%`,
     timestamp: now,
   };
 }
