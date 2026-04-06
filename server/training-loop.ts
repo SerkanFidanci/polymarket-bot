@@ -18,10 +18,31 @@ function getRoundCountFromDB(): number {
   }
 }
 
-// Training state
-let roundsSinceLastAccuracyCheck = 0;
-let roundsSinceLastOptimize = 0;
+// Training state — initialize from DB to survive PM2 restarts
+function getCounterFromDB(): { sinceAccuracy: number; sinceOptimize: number } {
+  try {
+    const totalRounds = db.prepare('SELECT COUNT(*) as c FROM training_rounds').get() as { c: number };
+
+    // Rounds since last accuracy check
+    const lastAcc = db.prepare('SELECT MAX(period_rounds) as r FROM signal_accuracy_log').get() as { r: number | null };
+    const sinceAccuracy = lastAcc.r ? totalRounds.c - lastAcc.r : totalRounds.c;
+
+    // Rounds since last optimization
+    const lastOpt = db.prepare('SELECT MAX(rounds_analyzed) as r FROM optimization_history').get() as { r: number | null };
+    const sinceOptimize = lastOpt.r ? totalRounds.c - lastOpt.r : totalRounds.c;
+
+    return { sinceAccuracy: Math.max(0, sinceAccuracy), sinceOptimize: Math.max(0, sinceOptimize) };
+  } catch {
+    return { sinceAccuracy: 0, sinceOptimize: 0 };
+  }
+}
+
+const initialCounters = getCounterFromDB();
+let roundsSinceLastAccuracyCheck = initialCounters.sinceAccuracy;
+let roundsSinceLastOptimize = initialCounters.sinceOptimize;
 let lastAccuracies: SignalAccuracy[] = [];
+
+console.log(`[TrainingLoop] Counters from DB: sinceAccuracy=${roundsSinceLastAccuracyCheck}, sinceOptimize=${roundsSinceLastOptimize}`);
 
 function getAllTrainingRounds(): unknown[] {
   return db.prepare('SELECT * FROM training_rounds ORDER BY id ASC').all();
@@ -373,10 +394,11 @@ export const serverTrainingLoop = {
     await runAccuracyCheck();
   },
 
-  // Manual trigger for full optimization
+  // Manual trigger for full optimization — force run with enough rounds
   async runOptimizationNow(): Promise<void> {
-    roundsSinceLastOptimize = 0;
+    roundsSinceLastOptimize = 999; // Force past all thresholds
     await runFullOptimization();
+    roundsSinceLastOptimize = 0;
   },
 
   async start(): Promise<void> {

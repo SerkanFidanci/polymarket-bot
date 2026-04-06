@@ -144,7 +144,7 @@ function getSignalScore(round: TrainingRow, name: SignalName): number {
 function simulateWithWeights(
   rounds: TrainingRow[],
   weights: SignalWeights,
-  config: ThresholdConfig = { minConfidence: 30, minSignalStrength: 15, kellyFraction: 0.5, maxBetPercent: 0.15 }
+  config: ThresholdConfig = { minConfidence: 20, minSignalStrength: 15, kellyFraction: 0.25, maxBetPercent: 0.05 }
 ): { pnl: number; sharpe: number; wins: number; losses: number; skips: number } {
   let bankroll = 50;
   let totalPnl = 0;
@@ -163,19 +163,23 @@ function simulateWithWeights(
       score += getSignalScore(round, name) * weights[name];
     }
 
-    // Calculate confidence (simplified)
-    const activeSigns = ALL_SIGNALS
-      .filter(n => Math.abs(getSignalScore(round, n)) > 10)
-      .map(n => Math.sign(getSignalScore(round, n)));
+    // Calculate confidence (normalized formula — matches SignalEngine)
+    const activeSignals = ALL_SIGNALS
+      .filter(n => Math.abs(getSignalScore(round, n)) > 5);
 
-    let confidence = 0;
-    if (activeSigns.length > 0) {
-      const majority = Math.max(
-        activeSigns.filter(s => s === 1).length,
-        activeSigns.filter(s => s === -1).length
-      );
-      confidence = Math.abs(score) * (majority / activeSigns.length);
-    }
+    const avgAbsScore = activeSignals.length > 0
+      ? activeSignals.reduce((sum, n) => sum + Math.abs(getSignalScore(round, n)), 0) / activeSignals.length
+      : 0;
+
+    const majority = Math.max(
+      activeSignals.filter(n => getSignalScore(round, n) > 0).length,
+      activeSignals.filter(n => getSignalScore(round, n) < 0).length
+    );
+    const agreement = activeSignals.length > 0 ? majority / activeSignals.length : 0;
+
+    let confidence = (avgAbsScore / 100) * agreement * 100;
+    if (activeSignals.length >= 7 && agreement > 0.8) confidence *= 1.3;
+    if (activeSignals.length < 3) confidence = 0;
 
     // Decision
     if (confidence < config.minConfidence || Math.abs(score) < config.minSignalStrength) {
@@ -288,7 +292,7 @@ export function optimizeThresholds(rounds: TrainingRow[], weights: SignalWeights
   let bestConfig: ThresholdConfig = { minConfidence: 30, minSignalStrength: 15, kellyFraction: 0.5, maxBetPercent: 0.15 };
   let bestSharpe = -Infinity;
 
-  for (let conf = 20; conf <= 60; conf += 10) {
+  for (let conf = 15; conf <= 50; conf += 5) {
     for (let sig = 10; sig <= 40; sig += 10) {
       for (let kelly = 0.25; kelly <= 0.75; kelly += 0.25) {
         for (let maxBet = 0.05; maxBet <= 0.25; maxBet += 0.10) {
