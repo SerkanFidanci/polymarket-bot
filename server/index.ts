@@ -3,6 +3,10 @@ import express from 'express';
 import cors from 'cors';
 import { db, initDatabase } from './db/sqlite.js';
 import polymarketRoutes from './polymarket/routes.js';
+import { serverStreamManager } from './stream-manager.js';
+import { serverSignalEngine } from './signal-engine.js';
+import { serverTrainingLoop } from './training-loop.js';
+import { serverBinanceWS } from './binance-ws.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -14,6 +18,36 @@ app.use(express.json());
 initDatabase();
 
 // ===== API Routes =====
+
+// Live data endpoint — frontend polls this for server-side signal/round data
+app.get('/api/live-data', (_req, res) => {
+  try {
+    const signal = serverSignalEngine.getLastSignal();
+    const tracking = serverTrainingLoop.getTrackingState();
+    res.json({
+      btcPrice: serverBinanceWS.lastTradePrice,
+      isConnected: serverBinanceWS.isConnected,
+      signal: signal ? {
+        finalScore: signal.finalScore,
+        confidence: signal.confidence,
+        signals: signal.signals,
+        groupScores: signal.groupScores,
+        allGroupsAgree: signal.allGroupsAgree,
+        timestamp: signal.timestamp,
+      } : null,
+      training: {
+        roundCount: tracking.roundCounter,
+        currentSlug: tracking.currentSlug,
+        roundStartPrice: tracking.roundStartPrice,
+        roundUpPrice: tracking.roundUpPrice,
+        roundDownPrice: tracking.roundDownPrice,
+        hasSignalSnapshot: tracking.hasSignalSnapshot,
+      },
+    });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
 
 // System state
 app.get('/api/state', (_req, res) => {
@@ -369,4 +403,27 @@ if (fs.existsSync(distPath)) {
 
 app.listen(PORT, () => {
   console.log(`[Server] Running on http://localhost:${PORT}`);
+
+  // Boot server-side data pipeline (Binance WS + Signals + Training Loop)
+  // This runs independently of the frontend browser
+  (async () => {
+    try {
+      console.log('[Server] Starting server-side data pipeline...');
+
+      // 1. Connect Binance WebSocket + Futures REST polling
+      await serverStreamManager.start();
+      console.log('[Server] Binance streams connected');
+
+      // 2. Start signal engine (every 1 second)
+      serverSignalEngine.start(1000);
+      console.log('[Server] Signal engine started');
+
+      // 3. Start training loop (polls PM rounds every 10s, records to DB)
+      // This is the critical part — runs 24/7 even when browser is closed
+      serverTrainingLoop.start();
+      console.log('[Server] Training loop started — recording rounds 24/7');
+    } catch (err) {
+      console.error('[Server] Failed to start data pipeline:', err);
+    }
+  })();
 });

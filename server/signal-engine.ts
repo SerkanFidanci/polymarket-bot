@@ -1,25 +1,24 @@
-import type { SignalResult, SignalName, CombinedSignal, SignalWeights, FuturesData } from '../types/index.js';
-import { DEFAULT_WEIGHTS, SIGNAL_GROUPS } from '../types/signals.js';
-import { sign } from '../utils/math.js';
-import { logger } from '../utils/logger.js';
-import { binanceWS } from '../websocket/BinanceWS.js';
-import { streamManager } from '../websocket/StreamManager.js';
+import { serverBinanceWS } from './binance-ws.js';
+import { serverStreamManager } from './stream-manager.js';
+import type { SignalResult, SignalName, CombinedSignal, SignalWeights, FuturesData } from '../src/types/index.js';
+import { DEFAULT_WEIGHTS, SIGNAL_GROUPS } from '../src/types/signals.js';
+import { sign } from '../src/utils/math.js';
 
-import { calculateOrderBookSignal } from './signals/OrderBookSignal.js';
-import { calculateEmaMacdSignal } from './signals/EmaMacdSignal.js';
-import { calculateRsiStochSignal } from './signals/RsiStochSignal.js';
-import { calculateVwapBollingerSignal } from './signals/VwapBollingerSignal.js';
-import { calculateCvdSignal } from './signals/CvdSignal.js';
-import { calculateWhaleSignal } from './signals/WhaleSignal.js';
-import { calculateFundingRateSignal } from './signals/FundingRateSignal.js';
-import { calculateOpenInterestSignal } from './signals/OpenInterestSignal.js';
-import { calculateLiquidationSignal } from './signals/LiquidationSignal.js';
-import { calculateLsRatioSignal } from './signals/LsRatioSignal.js';
+import { calculateOrderBookSignal } from '../src/engine/signals/OrderBookSignal.js';
+import { calculateEmaMacdSignal } from '../src/engine/signals/EmaMacdSignal.js';
+import { calculateRsiStochSignal } from '../src/engine/signals/RsiStochSignal.js';
+import { calculateVwapBollingerSignal } from '../src/engine/signals/VwapBollingerSignal.js';
+import { calculateCvdSignal } from '../src/engine/signals/CvdSignal.js';
+import { calculateWhaleSignal } from '../src/engine/signals/WhaleSignal.js';
+import { calculateFundingRateSignal } from '../src/engine/signals/FundingRateSignal.js';
+import { calculateOpenInterestSignal } from '../src/engine/signals/OpenInterestSignal.js';
+import { calculateLiquidationSignal } from '../src/engine/signals/LiquidationSignal.js';
+import { calculateLsRatioSignal } from '../src/engine/signals/LsRatioSignal.js';
 
 let currentWeights: SignalWeights = { ...DEFAULT_WEIGHTS };
 let lastCombined: CombinedSignal | null = null;
 let priceHistory5m: number[] = [];
-let listeners: ((signal: CombinedSignal) => void)[] = [];
+let calcInterval: ReturnType<typeof setInterval> | null = null;
 
 function mean(values: number[]): number {
   if (values.length === 0) return 0;
@@ -27,20 +26,19 @@ function mean(values: number[]): number {
 }
 
 function computeAllSignals(): Record<SignalName, SignalResult> {
-  const closes = binanceWS.getCloses();
-  const volumes = binanceWS.getVolumes();
-  const currentPrice = binanceWS.lastTradePrice;
-  const recentTrades2m = binanceWS.getRecentTrades(120000);
-  const recentLiqs2m = binanceWS.getRecentLiquidations(120000);
-  const futuresData: FuturesData = streamManager.getFuturesData();
+  const closes = serverBinanceWS.getCloses();
+  const volumes = serverBinanceWS.getVolumes();
+  const currentPrice = serverBinanceWS.lastTradePrice;
+  const recentTrades2m = serverBinanceWS.getRecentTrades(120000);
+  const recentLiqs2m = serverBinanceWS.getRecentLiquidations(120000);
+  const futuresData: FuturesData = serverStreamManager.getFuturesData();
 
-  // Track 5m price history for OI signal
   priceHistory5m.push(currentPrice);
   if (priceHistory5m.length > 60) priceHistory5m.shift();
   const price5mAgo = priceHistory5m.length > 5 ? priceHistory5m[priceHistory5m.length - 6]! : currentPrice;
 
   return {
-    orderbook: calculateOrderBookSignal(binanceWS.orderBook),
+    orderbook: calculateOrderBookSignal(serverBinanceWS.orderBook),
     ema_macd: calculateEmaMacdSignal(closes),
     rsi_stoch: calculateRsiStochSignal(closes),
     vwap_bb: calculateVwapBollingerSignal(closes, volumes, currentPrice),
@@ -54,7 +52,6 @@ function computeAllSignals(): Record<SignalName, SignalResult> {
 }
 
 function combineSignals(signals: Record<SignalName, SignalResult>): CombinedSignal {
-  // Weighted final score
   let finalScore = 0;
   const signalNames = Object.keys(signals) as SignalName[];
   for (const name of signalNames) {
@@ -107,9 +104,7 @@ function combineSignals(signals: Record<SignalName, SignalResult>): CombinedSign
   };
 }
 
-let calcInterval: ReturnType<typeof setInterval> | null = null;
-
-export const signalEngine = {
+export const serverSignalEngine = {
   getLastSignal(): CombinedSignal | null {
     return lastCombined;
   },
@@ -120,29 +115,23 @@ export const signalEngine = {
 
   setWeights(weights: SignalWeights) {
     currentWeights = { ...weights };
-    logger.info('SignalEngine', `Weights updated: ${JSON.stringify(weights)}`);
-  },
-
-  onSignal(listener: (signal: CombinedSignal) => void) {
-    listeners.push(listener);
-    return () => { listeners = listeners.filter(l => l !== listener); };
+    console.log(`[ServerSignalEngine] Weights updated`);
   },
 
   calculate(): CombinedSignal {
     const signals = computeAllSignals();
     const combined = combineSignals(signals);
     lastCombined = combined;
-    for (const listener of listeners) listener(combined);
     return combined;
   },
 
   start(intervalMs: number = 1000) {
-    logger.info('SignalEngine', `Starting signal engine (${intervalMs}ms interval)`);
+    console.log(`[ServerSignalEngine] Starting signal engine (${intervalMs}ms interval)`);
     calcInterval = setInterval(() => {
       try {
         this.calculate();
       } catch (err) {
-        logger.error('SignalEngine', `Calculation error: ${err}`);
+        console.error(`[ServerSignalEngine] Calculation error: ${err}`);
       }
     }, intervalMs);
   },
@@ -152,6 +141,6 @@ export const signalEngine = {
       clearInterval(calcInterval);
       calcInterval = null;
     }
-    logger.info('SignalEngine', 'Signal engine stopped');
+    console.log('[ServerSignalEngine] Signal engine stopped');
   },
 };

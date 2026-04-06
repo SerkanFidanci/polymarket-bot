@@ -61,13 +61,13 @@ export function makeDecision(ctx: DecisionContext): Decision {
   let minScore = 15;
 
   if (highVolatility) {
-    minConfidence = 60;
-    minScore = 30;
+    minConfidence = 45;
+    minScore = 25;
   }
 
   if (lowLiquidity || isWeekendLowLiquidity()) {
-    minConfidence = Math.max(minConfidence, 50);
-    minScore = Math.max(minScore, 25);
+    minConfidence = Math.max(minConfidence, 30);
+    minScore = Math.max(minScore, 20);
   }
 
   // Tilt adjustments
