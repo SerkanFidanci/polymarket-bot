@@ -38,8 +38,11 @@ export function PolymarketPanel() {
       } else {
         setSearching(false);
         setRound(prev => {
-          // New round (different slug) — set everything
-          if (!prev || prev.slug !== data.slug) return data;
+          // New round (different slug) — set everything including new endTime
+          if (!prev || prev.slug !== data.slug) {
+            console.log('[PM] New round:', data.slug, data.title);
+            return data;
+          }
           // Same round — only update metadata, keep CLOB prices
           return { ...prev, acceptingOrders: data.acceptingOrders, closed: data.closed, active: data.active };
         });
@@ -76,26 +79,35 @@ export function PolymarketPanel() {
       .catch(() => {});
   }, []);
 
-  // Timer 0 = round ended, need faster polling for next round
-  const roundEnded = round !== null && timeLeft === 0;
-
-  // Poll for round — faster when round ended or searching
+  // Poll for round every 5s
   useEffect(() => {
     fetchRound();
-    const interval = setInterval(fetchRound, (searching || roundEnded) ? 2000 : 5000);
+    const interval = setInterval(fetchRound, 5000);
     return () => clearInterval(interval);
-  }, [fetchRound, searching, roundEnded]);
+  }, [fetchRound]);
 
-  // Countdown timer
+  // Countdown timer + aggressive fetch when round ends
   useEffect(() => {
+    let rapidPollId: ReturnType<typeof setInterval> | null = null;
+
     const interval = setInterval(() => {
       if (round) {
         const left = Math.max(0, Math.floor((round.endTime - Date.now()) / 1000));
         setTimeLeft(left);
+
+        // Round just ended — start rapid polling every 1s until new round found
+        if (left === 0 && !rapidPollId) {
+          fetchRound(); // immediate
+          rapidPollId = setInterval(fetchRound, 1000);
+        }
       }
     }, 1000);
-    return () => clearInterval(interval);
-  }, [round]);
+
+    return () => {
+      clearInterval(interval);
+      if (rapidPollId) clearInterval(rapidPollId);
+    };
+  }, [round, fetchRound]);
 
   // Refresh prices every 3s via CLOB order book (real-time)
   useEffect(() => {
