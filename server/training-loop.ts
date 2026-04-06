@@ -144,7 +144,7 @@ function saveRound(roundData: Record<string, unknown>): number | null {
     ).get(roundData.roundStartTime) as { id: number } | undefined;
 
     if (existing) {
-      return existing.id;
+      return null; // Dedup — don't count as new round
     }
 
     const stmt = db.prepare(`
@@ -331,7 +331,7 @@ export const serverTrainingLoop = {
       roundUpPrice,
       roundDownPrice,
       roundStartTime,
-      roundCounter,
+      roundCounter: getRoundCountFromDB(),
       hasSignalSnapshot: !!startSignalSnapshot,
       roundsSinceLastAccuracyCheck,
       roundsSinceLastOptimize,
