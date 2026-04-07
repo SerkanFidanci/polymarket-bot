@@ -176,6 +176,32 @@ export function initDatabase(): void {
       notes TEXT
     );
 
+    -- Strategy parallel testing
+    CREATE TABLE IF NOT EXISTS strategy_trades (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      round_id INTEGER,
+      strategy_name TEXT NOT NULL,
+      decision TEXT NOT NULL,
+      entry_price REAL,
+      bet_size REAL,
+      exit_price REAL,
+      exit_reason TEXT,
+      pnl REAL,
+      actual_result TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS strategy_balances (
+      strategy_name TEXT PRIMARY KEY,
+      balance REAL NOT NULL DEFAULT 50,
+      total_pnl REAL NOT NULL DEFAULT 0,
+      wins INTEGER NOT NULL DEFAULT 0,
+      losses INTEGER NOT NULL DEFAULT 0,
+      total_trades INTEGER NOT NULL DEFAULT 0,
+      max_drawdown REAL NOT NULL DEFAULT 0,
+      peak_balance REAL NOT NULL DEFAULT 50
+    );
+
     -- Signal retirement log
     CREATE TABLE IF NOT EXISTS signal_retirement_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,

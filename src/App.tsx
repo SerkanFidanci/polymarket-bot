@@ -12,6 +12,7 @@ import { PaperTrading } from './components/PaperTrading';
 import { LogFeed } from './components/LogFeed';
 import { TrainingPanel } from './components/TrainingPanel';
 import { TradeHistory } from './components/TradeHistory';
+import { StrategyLeaderboard } from './components/StrategyLeaderboard';
 import type { SignalName } from './types/signals';
 
 const GROUP_A: SignalName[] = ['orderbook', 'ema_macd', 'rsi_stoch', 'vwap_bb'];
@@ -105,7 +106,8 @@ function App() {
           ))}
         </div>
 
-        {/* Row 4: Trade History + Bankroll + Logs */}
+        {/* Row 4: Strategy Leaderboard + Trade History */}
+        <StrategyLeaderboard />
         <TradeHistory />
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <BankrollDashboard />

@@ -7,6 +7,7 @@ import { serverStreamManager } from './stream-manager.js';
 import { serverSignalEngine } from './signal-engine.js';
 import { serverTrainingLoop } from './training-loop.js';
 import { serverBinanceWS } from './binance-ws.js';
+import { strategyManager } from './strategy-manager.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -430,6 +431,25 @@ app.get('/api/paper-trades/count', (_req, res) => {
   try {
     const row = db.prepare('SELECT COUNT(*) as count FROM paper_trades').get() as { count: number };
     res.json({ count: row.count });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Strategy leaderboard
+app.get('/api/strategies/leaderboard', (_req, res) => {
+  try {
+    res.json(strategyManager.getLeaderboard());
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Strategy trades
+app.get('/api/strategies/:name/trades', (req, res) => {
+  try {
+    const rows = db.prepare('SELECT * FROM strategy_trades WHERE strategy_name = ? ORDER BY id DESC LIMIT 50').all(req.params.name);
+    res.json(rows);
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

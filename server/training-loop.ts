@@ -7,6 +7,7 @@ import { measureAllSignalAccuracy, runOptimizationCycle } from '../src/engine/Op
 import type { SignalAccuracy } from '../src/types/signals.js';
 import { evaluateExitConditions, recordBtcPrice, type OpenPosition } from './exit-manager.js';
 import { EXIT_CHECK_INTERVAL } from '../src/utils/constants.js';
+import { strategyManager, setGlobalPrices } from './strategy-manager.js';
 
 let trainingInterval: ReturnType<typeof setInterval> | null = null;
 let roundCounter = getRoundCountFromDB();
@@ -187,6 +188,12 @@ function startExitMonitoring(): void {
   exitCheckInterval = setInterval(() => {
     // Record BTC price for trend detection
     recordBtcPrice(serverBinanceWS.lastTradePrice);
+
+    // Update global prices for strategy manager
+    setGlobalPrices(roundUpPrice, roundDownPrice);
+
+    // Check strategy exits
+    strategyManager.checkExits();
 
     // Check exit conditions if we have an open hypothetical position
     if (hypOpenPosition && !hypExitReason) {
@@ -417,6 +424,9 @@ async function pollRound(): Promise<void> {
 
           // Trigger accuracy check / optimization
           onRoundRecorded();
+
+          // Resolve strategy positions for this round
+          strategyManager.resolveRound(result, savedId as number);
         }
       }
 
@@ -468,7 +478,23 @@ async function pollRound(): Promise<void> {
         const snap = startSignalSnapshot;
         console.log(`[TrainingLoop] Snapshot @60s: Score:${snap?.finalScore?.toFixed(1)} Conf:${snap?.confidence?.toFixed(1)} | PM Up:${(roundUpPriceAtStart * 100).toFixed(1)}¢ Down:${(roundDownPriceAtStart * 100).toFixed(1)}¢ Fee:${(roundFeeRate*100).toFixed(1)}%`);
 
-        // Open hypothetical position for exit manager monitoring
+        // Evaluate all parallel strategies
+        if (snap && roundUpPriceAtStart > 0.01 && roundDownPriceAtStart > 0.01) {
+          const roundId = getRoundCountFromDB(); // approximate
+          const stratCtx = {
+            signal: snap,
+            upPrice: roundUpPriceAtStart,
+            downPrice: roundDownPriceAtStart,
+            feeRate: roundFeeRate,
+            roundEndTime: round.startTime + 300000,
+            roundId,
+            actualResult: '', // unknown yet
+            timeIntoRound: 60, // snapshot at 60s
+          };
+          strategyManager.evaluateEntries(stratCtx);
+        }
+
+        // Open hypothetical position for BASELINE exit manager monitoring
         if (snap && roundUpPriceAtStart > 0.01 && roundDownPriceAtStart > 0.01) {
           const sc = snap.finalScore;
           const cn = snap.confidence;
@@ -504,6 +530,25 @@ async function pollRound(): Promise<void> {
         if (prices) {
           roundUpPrice = prices.priceUp;
           roundDownPrice = prices.priceDown;
+          setGlobalPrices(roundUpPrice, roundDownPrice);
+        }
+      }
+
+      // Late entry strategies: evaluate during round (after 210s)
+      const timeIntoRound = (Date.now() - round.startTime) / 1000;
+      if (timeIntoRound >= 210 && timeIntoRound <= 290 && roundUpPrice > 0.01 && roundDownPrice > 0.01) {
+        const signal = serverSignalEngine.getLastSignal();
+        if (signal) {
+          strategyManager.evaluateEntries({
+            signal,
+            upPrice: roundUpPrice,
+            downPrice: roundDownPrice,
+            feeRate: polymarketClient.calculateFee(roundUpPrice),
+            roundEndTime: round.startTime + 300000,
+            roundId: getRoundCountFromDB(),
+            actualResult: '',
+            timeIntoRound,
+          });
         }
       }
     }
