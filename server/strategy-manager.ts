@@ -271,10 +271,7 @@ export const strategyManager = {
 
       // Position still open → binary result
       const won = pos.direction === actualResult;
-      const shares = pos.betSize / pos.entryPrice;
-      const pnl = won ? shares * (1 - pos.entryPrice) - (pos.betSize * 0.01) : -pos.betSize;
-
-      resolvePosition(strat.name, pos, won ? 1.0 : 0.0, 'held_to_expiry');
+      resolvePositionWithResult(strat.name, pos, won ? 1.0 : 0.0, 'held_to_expiry', actualResult);
     }
 
     // Clear all positions
@@ -332,15 +329,19 @@ export function setGlobalPrices(up: number, down: number): void {
   roundDownPriceGlobal = down;
 }
 
-function resolvePosition(stratName: string, pos: OpenPos, exitPrice: number, reason: string): void {
+function resolvePositionWithResult(stratName: string, pos: OpenPos, exitPrice: number, reason: string, actualResult: string): void {
   const shares = pos.betSize / pos.entryPrice;
   const pnl = (exitPrice - pos.entryPrice) * shares;
 
-  // Save trade
+  // Save trade — actual_result is the ROUND result, not the position direction
   db.prepare(`
     INSERT INTO strategy_trades (round_id, strategy_name, decision, entry_price, bet_size, exit_price, exit_reason, pnl, actual_result)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(pos.roundId, stratName, 'BUY_' + pos.direction, pos.entryPrice, pos.betSize, exitPrice, reason, pnl, pos.direction);
+  `).run(pos.roundId, stratName, 'BUY_' + pos.direction, pos.entryPrice, pos.betSize, exitPrice, reason, pnl, actualResult);}
+
+// For early exits (no actual_result yet — use direction as placeholder)
+function resolvePosition(stratName: string, pos: OpenPos, exitPrice: number, reason: string): void {
+  resolvePositionWithResult(stratName, pos, exitPrice, reason, pos.direction);
 
   // Update balance
   ensureBalance(stratName);
