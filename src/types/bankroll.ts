@@ -41,7 +41,7 @@ export const DEFAULT_RISK_CONFIG: RiskConfig = {
   kellyFractionAggressive: 0.40,    // Near-extreme prices: higher Kelly
   kellyFractionConservative: 0.15,  // Uncertain zone: lower Kelly
   minBet: 1,
-  maxBetPercent: 0.10,              // Max 10% of bankroll per bet
+  maxBetPercent: 0.03,              // Max 3% of bankroll per bet
   dailyLossLimit: 0.20,
   dailyProfitTarget: 0.40,
   systemStopLoss: 0.75,

@@ -53,3 +53,18 @@ export const MIN_SIGNAL_ACCURACY = 0.50;
 export const OPTIMIZE_EVERY_N_ROUNDS = 100;
 export const EDGE_OPTIMIZE_EVERY_N_ROUNDS = 200;
 export const FULL_OPTIMIZE_EVERY_N_ROUNDS = 500;
+
+// ===== EXIT STRATEGY =====
+export const EXIT_CHECK_INTERVAL = 5000;          // Check exits every 5s
+export const STOP_LOSS_PCT = 0.50;                 // Exit if token drops to 50% of entry
+export const TAKE_PROFIT_PCT = 1.80;               // Exit if token rises to 180% of entry
+export const ABSOLUTE_STOP = 0.15;                 // Exit if token < 15¢ (recovery impossible)
+export const ABSOLUTE_TARGET = 0.85;               // Exit if token > 85¢ (nearly won)
+export const TREND_REVERSAL_BTC_PCT = 0.001;       // 0.1% BTC move against position in 30s
+export const TREND_REVERSAL_DURATION_MS = 30000;   // 30 seconds lookback
+export const SIGNAL_FLIP_THRESHOLD = 10;           // Exit if signal score flips > 10 against
+export const TIME_EXIT_60S_MIN = 0.30;             // With 60s left, exit if token < 30¢
+export const TIME_EXIT_60S_MAX = 0.70;             // With 60s left, exit if token in 30-70¢
+export const TIME_EXIT_30S_MIN = 0.80;             // With 30s left, exit if token < 80¢
+export const VOLATILITY_SPIKE_BTC_PCT = 0.003;     // 0.3% BTC move in 30s = volatility spike
+export const TRAILING_STOP_PCT = 0.20;             // Trailing stop: 20% from peak

@@ -5,6 +5,8 @@ import { db } from './db/sqlite.js';
 import type { CombinedSignal } from '../src/types/index.js';
 import { measureAllSignalAccuracy, runOptimizationCycle } from '../src/engine/OptimizationEngine.js';
 import type { SignalAccuracy } from '../src/types/signals.js';
+import { evaluateExitConditions, recordBtcPrice, type OpenPosition } from './exit-manager.js';
+import { EXIT_CHECK_INTERVAL } from '../src/utils/constants.js';
 
 let trainingInterval: ReturnType<typeof setInterval> | null = null;
 let roundCounter = getRoundCountFromDB();
@@ -173,6 +175,34 @@ let roundDownPrice = 0;
 let roundStartTime = '';
 let startSignalSnapshot: CombinedSignal | null = null;
 let snapshotTimer: ReturnType<typeof setTimeout> | null = null;
+
+// Hypothetical open position for exit simulation
+let hypOpenPosition: OpenPosition | null = null;
+let hypExitReason: string | null = null;
+let hypExitPrice = 0;
+let exitCheckInterval: ReturnType<typeof setInterval> | null = null;
+
+function startExitMonitoring(): void {
+  if (exitCheckInterval) clearInterval(exitCheckInterval);
+  exitCheckInterval = setInterval(() => {
+    // Record BTC price for trend detection
+    recordBtcPrice(serverBinanceWS.lastTradePrice);
+
+    // Check exit conditions if we have an open hypothetical position
+    if (hypOpenPosition && !hypExitReason) {
+      const dir = hypOpenPosition.direction;
+      const currentToken = dir === 'UP' ? roundUpPrice : roundDownPrice;
+      if (currentToken > 0.01) {
+        const result = evaluateExitConditions(hypOpenPosition, currentToken);
+        if (result.shouldExit) {
+          hypExitReason = result.reason;
+          hypExitPrice = result.exitPrice;
+          console.log(`[ExitManager] EXIT: ${result.reason} | Entry:${(hypOpenPosition.entryPrice * 100).toFixed(0)}¢ Exit:${(result.exitPrice * 100).toFixed(0)}¢ PnL:$${result.pnl.toFixed(2)}`);
+        }
+      }
+    }
+  }, EXIT_CHECK_INTERVAL);
+}
 let snapshotTaken = false;
 
 
@@ -195,8 +225,8 @@ function saveRound(roundData: Record<string, unknown>): number | null {
         signal_cvd, signal_whale, signal_funding, signal_open_interest,
         signal_liquidation, signal_ls_ratio, final_score, confidence,
         hypothetical_decision, hypothetical_ev, hypothetical_bet_size, hypothetical_pnl,
-        polymarket_fee_rate, orderbook_spread_at_entry
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        polymarket_fee_rate, orderbook_spread_at_entry, exit_reason, exit_price
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     const result = stmt.run(
@@ -213,6 +243,7 @@ function saveRound(roundData: Record<string, unknown>): number | null {
       roundData.hypotheticalDecision, roundData.hypotheticalEv,
       roundData.hypotheticalBetSize, roundData.hypotheticalPnl,
       roundData.polymarketFeeRate ?? null, roundData.orderbookSpread ?? null,
+      roundData.exitReason ?? null, roundData.exitPrice ?? null,
     );
 
     return result.lastInsertRowid as number;
@@ -316,10 +347,20 @@ async function pollRound(): Promise<void> {
             else if (price >= 0.40 && price <= 0.60) kellyFrac = 0.15; // uncertain
             const adjustedKelly = rawKelly * kellyFrac;
             const bankroll = 50; // hypothetical bankroll
-            hypBetSize = Math.max(1, Math.min(bankroll * adjustedKelly, bankroll * 0.10));
+            hypBetSize = Math.max(1, Math.min(bankroll * adjustedKelly, bankroll * 0.03));
             hypBetSize = Math.round(hypBetSize * 100) / 100;
-            const won = dir === result;
-            hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
+
+            // Check if exit manager triggered early exit
+            if (hypExitReason && hypExitPrice > 0) {
+              // Early exit — PnL based on exit price, not round result
+              const shares = hypBetSize / price;
+              hypPnl = (hypExitPrice - price) * shares;
+              console.log(`[TrainingLoop] Hyp trade exited early: ${hypExitReason} | Entry:${(price*100).toFixed(0)}¢ Exit:${(hypExitPrice*100).toFixed(0)}¢ PnL:$${hypPnl.toFixed(2)}`);
+            } else {
+              // Held to expiry — binary result
+              const won = dir === result;
+              hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
+            }
           } else {
             hypDecision = 'SKIP';
           }
@@ -329,14 +370,23 @@ async function pollRound(): Promise<void> {
         const startMs = new Date(roundStartTime).getTime();
         const roundEndTimeFixed = new Date(startMs + 300000).toISOString();
 
+        // Final price guard before DB write
+        if (!roundUpPriceAtStart || !roundDownPriceAtStart || roundUpPriceAtStart < 0.01 || roundDownPriceAtStart < 0.01) {
+          console.log(`[TrainingLoop] BLOCKED save — prices still invalid at write time: Up:${roundUpPriceAtStart} Down:${roundDownPriceAtStart}`);
+          hypDecision = 'SKIP';
+          hypEv = 0;
+          hypBetSize = 0;
+          hypPnl = 0;
+        }
+
         const roundData = {
           roundStartTime,
           roundEndTime: roundEndTimeFixed,
           btcPriceStart: roundStartPrice,
           btcPriceEnd: endPrice,
           actualResult: result,
-          polymarketUpPrice: roundUpPriceAtStart,
-          polymarketDownPrice: roundDownPriceAtStart,
+          polymarketUpPrice: roundUpPriceAtStart || null,
+          polymarketDownPrice: roundDownPriceAtStart || null,
           signalOrderbook: startSignalSnapshot.signals.orderbook?.score ?? 0,
           signalEmaMacd: startSignalSnapshot.signals.ema_macd?.score ?? 0,
           signalRsiStoch: startSignalSnapshot.signals.rsi_stoch?.score ?? 0,
@@ -355,17 +405,25 @@ async function pollRound(): Promise<void> {
           hypotheticalPnl: hypPnl,
           polymarketFeeRate: roundFeeRate,
           orderbookSpread: roundSpread,
+          exitReason: hypExitReason ?? (hypDecision !== 'SKIP' ? 'held_to_expiry' : null),
+          exitPrice: hypExitPrice > 0 ? hypExitPrice : null,
         };
 
         const savedId = saveRound(roundData);
         if (savedId) {
           roundCounter++;
-          console.log(`[TrainingLoop] Round #${roundCounter}: ${result} | BTC ${roundStartPrice.toFixed(0)}→${endPrice.toFixed(0)} | PM Up:${(roundUpPrice * 100).toFixed(0)}¢ Down:${(roundDownPrice * 100).toFixed(0)}¢ | Score:${score.toFixed(1)} Conf:${conf.toFixed(1)} → ${hypDecision}`);
+          const exitInfo = hypExitReason ? ` [EXIT:${hypExitReason}]` : '';
+          console.log(`[TrainingLoop] Round #${roundCounter}: ${result} | BTC ${roundStartPrice.toFixed(0)}→${endPrice.toFixed(0)} | PM Up:${(roundUpPrice * 100).toFixed(0)}¢ Down:${(roundDownPrice * 100).toFixed(0)}¢ | Score:${score.toFixed(1)} Conf:${conf.toFixed(1)} → ${hypDecision}${exitInfo}`);
 
           // Trigger accuracy check / optimization
           onRoundRecorded();
         }
       }
+
+      // Reset hypothetical position for new round
+      hypOpenPosition = null;
+      hypExitReason = null;
+      hypExitPrice = 0;
 
       // Start tracking new round — use PM window timestamp, not detection time
       const nowMs = Date.now();
@@ -400,12 +458,35 @@ async function pollRound(): Promise<void> {
       snapshotTimer = setTimeout(() => {
         startSignalSnapshot = serverSignalEngine.getLastSignal();
         snapshotTaken = true;
-        // Snapshot PM prices and fee at this moment (not resolved end prices)
-        roundUpPriceAtStart = roundUpPrice;
-        roundDownPriceAtStart = roundDownPrice;
-        roundFeeRate = polymarketClient.calculateFee(roundUpPrice);
+        // Snapshot PM prices at this moment — only if CLOB has provided prices
+        // Keep Gamma prices if CLOB hasn't updated yet
+        if (roundUpPrice > 0.01 && roundDownPrice > 0.01) {
+          roundUpPriceAtStart = roundUpPrice;
+          roundDownPriceAtStart = roundDownPrice;
+        }
+        roundFeeRate = polymarketClient.calculateFee(roundUpPriceAtStart);
         const snap = startSignalSnapshot;
         console.log(`[TrainingLoop] Snapshot @60s: Score:${snap?.finalScore?.toFixed(1)} Conf:${snap?.confidence?.toFixed(1)} | PM Up:${(roundUpPriceAtStart * 100).toFixed(1)}¢ Down:${(roundDownPriceAtStart * 100).toFixed(1)}¢ Fee:${(roundFeeRate*100).toFixed(1)}%`);
+
+        // Open hypothetical position for exit manager monitoring
+        if (snap && roundUpPriceAtStart > 0.01 && roundDownPriceAtStart > 0.01) {
+          const sc = snap.finalScore;
+          const cn = snap.confidence;
+          const dir = sc > 0 ? 'UP' : 'DOWN';
+          const minSc = dir === 'UP' ? 20 : 15;
+          if (Math.abs(sc) > minSc && cn > 20 && cn <= 50) {
+            const entryP = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
+            hypOpenPosition = {
+              direction: dir as 'UP' | 'DOWN',
+              entryPrice: entryP,
+              betSize: 1.5, // placeholder, real calc at round end
+              btcEntryPrice: serverBinanceWS.lastTradePrice,
+              roundEndTime: round.startTime + 300000,
+              peakTokenPrice: entryP,
+            };
+            console.log(`[ExitManager] Opened hyp position: ${dir} @${(entryP*100).toFixed(0)}¢`);
+          }
+        }
       }, delayMs);
 
       // Initial fee from round start price
@@ -486,6 +567,10 @@ export const serverTrainingLoop = {
     console.log('[TrainingLoop] Starting round polling (10s interval)');
     pollRound();
     trainingInterval = setInterval(pollRound, 10000);
+
+    // Start exit monitoring (checks every 5s)
+    startExitMonitoring();
+    console.log('[TrainingLoop] Exit manager started (5s interval)');
   },
 
   stop() {
