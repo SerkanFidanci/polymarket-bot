@@ -62,8 +62,11 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit() {
-      // No early exit — hold to expiry
+    shouldExit(pos, tokenPrice) {
+      // Stop-loss: exit if token drops below 15c (prevent full wipeout)
+      if (tokenPrice < 0.15) return { shouldExit: true, reason: 'stop_loss_15c', exitPrice: tokenPrice };
+      // Also exit if dropped 60% from entry
+      if (tokenPrice < pos.entryPrice * 0.40) return { shouldExit: true, reason: 'stop_loss_60pct', exitPrice: tokenPrice };
       return null;
     },
   },
