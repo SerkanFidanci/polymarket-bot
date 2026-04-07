@@ -345,7 +345,10 @@ async function pollRound(): Promise<void> {
           const winAmt = 1 - price;
           const loseAmt = price;
           const ourProb = Math.min(0.85, 0.5 + Math.abs(score) / 200);
-          hypEv = (ourProb * winAmt) - ((1 - ourProb) * loseAmt) - roundFeeRate;
+          // Fee per share = 0.072 * p * (1-p), total fee in dollars = shares * feePerShare
+          // = (betSize/price) * 0.072 * price * (1-price) = betSize * 0.072 * (1-price)
+          const feePerDollar = 0.072 * (1 - price); // fee as fraction of bet
+          hypEv = (ourProb * winAmt) - ((1 - ourProb) * loseAmt) - feePerDollar;
 
           if (hypEv > 0) {
             // Kelly bet sizing (matches DecisionMaker logic)
@@ -371,7 +374,9 @@ async function pollRound(): Promise<void> {
             }
             // Always hold to expiry — binary result
             const won = dir === result;
-            hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
+            // Win: profit minus fee. Fee = shares × feePerShare = (betSize/price) × 0.072 × p × (1-p)
+            const feeDollar = hypBetSize * 0.072 * (1 - price);
+            hypPnl = won ? hypBetSize * (winAmt / loseAmt) - feeDollar : -hypBetSize;
           } else {
             hypDecision = 'SKIP';
           }

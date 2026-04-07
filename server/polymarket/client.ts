@@ -164,11 +164,10 @@ export const polymarketClient = {
     }
   },
 
-  // Calculate fee based on price (Polymarket fee = min(price, 1-price) * 2%)
-  // Lower prices = lower fees, extreme prices = minimal fees
+  // Polymarket taker fee: 0.072 × p × (1-p) per share
+  // Source: https://docs.polymarket.com/trading/fees
   calculateFee(price: number): number {
-    const minSide = Math.min(price, 1 - price);
-    return minSide * 0.02; // 2% of the cheaper side
+    return 0.072 * price * (1 - price);
   },
 
   // Fetch spread from CLOB book — find real liquidity near midpoint
