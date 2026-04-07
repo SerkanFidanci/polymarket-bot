@@ -265,7 +265,17 @@ async function pollRound(): Promise<void> {
           hypEv = (ourProb * winAmt) - ((1 - ourProb) * loseAmt) - roundFeeRate;
 
           if (hypEv > 0) {
-            hypBetSize = Math.min(50 * 0.05, 2.5);
+            // Kelly bet sizing (matches DecisionMaker logic)
+            const b = winAmt / loseAmt;
+            const rawKelly = ((b * ourProb) - (1 - ourProb)) / b;
+            // Zone-based Kelly fraction
+            let kellyFrac = 0.25; // default quarter Kelly
+            if (price <= 0.25 || price >= 0.75) kellyFrac = 0.40; // extreme
+            else if (price >= 0.40 && price <= 0.60) kellyFrac = 0.15; // uncertain
+            const adjustedKelly = rawKelly * kellyFrac;
+            const bankroll = 50; // hypothetical bankroll
+            hypBetSize = Math.max(1, Math.min(bankroll * adjustedKelly, bankroll * 0.10));
+            hypBetSize = Math.round(hypBetSize * 100) / 100;
             const won = dir === result;
             hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
           } else {
