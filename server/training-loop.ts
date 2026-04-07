@@ -335,7 +335,7 @@ async function pollRound(): Promise<void> {
         const dir = score > 0 ? 'UP' : 'DOWN';
         const minScoreForDir = dir === 'UP' ? 20 : 15; // UP needs stronger signal
 
-        if (pricesValid && !balanceStopLoss && !dailyStopLoss && Math.abs(score) > minScoreForDir && conf > 20 && confNotOverfit && feeOk && spreadOk) {
+        if (pricesValid && !balanceStopLoss && !dailyStopLoss && Math.abs(score) > minScoreForDir && conf > 15 && confNotOverfit && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
           // Use START prices for decision, not resolved end prices
           const price = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
