@@ -18,6 +18,7 @@ type StateUpdater = {
   addLog: (l: LogEntry) => void;
   setWarmupStartTime: (t: number | null) => void;
   setTrainingRoundsCount: (n: number) => void;
+  setPaperTradesCount: (n: number) => void;
   setLastDecision: (d: Decision) => void;
   setBankroll: (b: Record<string, unknown>) => void;
   setTradingMode: (m: string) => void;
@@ -160,11 +161,18 @@ export async function startBot(store: StateUpdater): Promise<void> {
 function startServerDataPoll(store: StateUpdater) {
   const poll = async () => {
     try {
-      // Read count from DB endpoint
-      const countRes = await fetch('/api/training-rounds/count');
+      // Read counts from DB endpoints
+      const [countRes, paperRes] = await Promise.all([
+        fetch('/api/training-rounds/count'),
+        fetch('/api/paper-trades/count'),
+      ]);
       if (countRes.ok) {
         const data = await countRes.json() as { count: number };
         store.setTrainingRoundsCount(data.count);
+      }
+      if (paperRes.ok) {
+        const data = await paperRes.json() as { count: number };
+        store.setPaperTradesCount(data.count);
       }
 
       // Read mode + weights from live-data endpoint

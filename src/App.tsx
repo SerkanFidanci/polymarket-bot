@@ -44,6 +44,7 @@ function App() {
       addLog: s.addLog,
       setWarmupStartTime: s.setWarmupStartTime,
       setTrainingRoundsCount: s.setTrainingRoundsCount,
+      setPaperTradesCount: s.setPaperTradesCount,
       setLastDecision: s.setLastDecision,
       setBankroll: s.setBankroll as (b: Record<string, unknown>) => void,
       setTradingMode: s.setTradingMode as (m: string) => void,
