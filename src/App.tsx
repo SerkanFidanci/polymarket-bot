@@ -19,11 +19,11 @@ function App() {
       <StatusBar data={live} />
 
       {/* Main Content */}
-      <div className="max-w-[1440px] mx-auto p-3 space-y-3">
+      <div className="max-w-[1440px] mx-auto p-2 space-y-2">
         {/* Top Row: PM Panel + Chart + Signals */}
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-2">
           {/* Left: PM Panel */}
-          <div className="lg:col-span-3 flex flex-col gap-3">
+          <div className="lg:col-span-3 flex flex-col gap-2">
             <PolymarketPanel round={round} live={live} />
             <SignalPanel data={live} />
           </div>
