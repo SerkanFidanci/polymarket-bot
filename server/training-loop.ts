@@ -250,13 +250,23 @@ async function pollRound(): Promise<void> {
         let hypPnl = 0;
         let hypEv = 0;
 
+        // Price snapshot guard — never trade without valid prices
+        const pricesValid = roundUpPriceAtStart > 0 && roundDownPriceAtStart > 0
+          && (roundUpPriceAtStart + roundDownPriceAtStart) > 0.9;
+
         // Skip if fee > 3% or spread > 5¢
         const feeOk = roundFeeRate <= 0.03;
         const spreadOk = roundSpread <= 0.05;
 
-        if (Math.abs(score) > 15 && conf > 20 && feeOk && spreadOk) {
+        // Overconfidence cap: confidence > 50 = overfit, skip
+        const confNotOverfit = conf <= 50;
+
+        // BUY_UP needs higher score (UP bias fix: UP WR=38% vs DOWN WR=56%)
+        const dir = score > 0 ? 'UP' : 'DOWN';
+        const minScoreForDir = dir === 'UP' ? 20 : 15; // UP needs stronger signal
+
+        if (pricesValid && Math.abs(score) > minScoreForDir && conf > 20 && confNotOverfit && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
-          const dir = score > 0 ? 'UP' : 'DOWN';
           // Use START prices for decision, not resolved end prices
           const price = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
           const winAmt = 1 - price;

@@ -57,6 +57,11 @@ export function makeDecision(ctx: DecisionContext): Decision {
     return skip(`Extreme odds (Up: ${priceUp.toFixed(2)})`, now);
   }
 
+  // Price validity guard
+  if (!priceUp || !priceDown || (priceUp + priceDown) < 0.9) {
+    return skip('No valid price snapshot', now);
+  }
+
   // Fee filter
   const fee = feeRate ?? 0.02;
   if (fee > config.maxFeeRate) {
@@ -98,6 +103,11 @@ export function makeDecision(ctx: DecisionContext): Decision {
     minConfidence += 15;
   }
 
+  // Overconfidence cap: data shows C>50 = 30% WR (overfit)
+  if (signal.confidence > 50) {
+    return skip(`Overconfidence cap (${signal.confidence.toFixed(0)} > 50)`, now);
+  }
+
   // Check thresholds
   if (signal.confidence < minConfidence) {
     return skip(`Low confidence (${signal.confidence.toFixed(0)} < ${minConfidence})`, now);
@@ -110,6 +120,14 @@ export function makeDecision(ctx: DecisionContext): Decision {
   // ===== DIRECTION + PROBABILITY =====
 
   const direction: Direction = signal.finalScore > 0 ? 'UP' : 'DOWN';
+
+  // BUY_UP bias fix: UP trades WR=38% vs DOWN WR=56%
+  // Require stronger score for UP direction
+  const dirMinScore = direction === 'UP' ? 20 : minScore;
+  if (Math.abs(signal.finalScore) < dirMinScore) {
+    return skip(`Weak ${direction} signal (|${signal.finalScore.toFixed(1)}| < ${dirMinScore})`, now);
+  }
+
   const price = direction === 'UP' ? priceUp : priceDown;
   const ourProbability = clamp(0.5 + (Math.abs(signal.finalScore) / 200), 0.51, 0.85);
 
