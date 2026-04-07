@@ -54,6 +54,16 @@ export async function startBot(store: StateUpdater): Promise<void> {
   logger.info('Bot', 'Starting BTC Polymarket Trading Bot...');
   store.setSystemStatus('INITIALIZING');
 
+  // Immediately fetch trading mode from server (don't wait for warmup)
+  try {
+    const modeRes = await fetch('/api/live-data');
+    if (modeRes.ok) {
+      const data = await modeRes.json() as { tradingMode?: string; weights?: Record<string, number> };
+      if (data.tradingMode) store.setTradingMode(data.tradingMode);
+      if (data.weights) store.setSignalWeights(data.weights as import('../types/signals.js').SignalWeights);
+    }
+  } catch { /* silent */ }
+
   // Log listener -> store
   logger.onLog((entry) => store.addLog(entry));
 

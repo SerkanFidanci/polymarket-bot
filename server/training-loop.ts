@@ -144,6 +144,21 @@ function onRoundRecorded() {
   }
 }
 
+function getHypotheticalBalance(): number {
+  try {
+    const row = db.prepare("SELECT COALESCE(SUM(hypothetical_pnl), 0) as total FROM training_rounds WHERE hypothetical_decision != 'SKIP'").get() as { total: number };
+    return 50 + row.total;
+  } catch { return 50; }
+}
+
+function getHypotheticalDailyPnl(): number {
+  try {
+    const today = new Date().toISOString().slice(0, 10);
+    const row = db.prepare("SELECT COALESCE(SUM(hypothetical_pnl), 0) as total FROM training_rounds WHERE hypothetical_decision != 'SKIP' AND round_start_time >= ?").get(today) as { total: number };
+    return row.total;
+  } catch { return 0; }
+}
+
 // Round tracking state
 let currentSlug = '';
 let currentTokenIdUp = '';
@@ -227,8 +242,12 @@ async function pollRound(): Promise<void> {
       // Clear snapshot timer from previous round
       if (snapshotTimer) { clearTimeout(snapshotTimer); snapshotTimer = null; }
 
-      // Save previous round (if we had one and snapshot was taken)
-      if (currentSlug && roundStartPrice > 0 && startSignalSnapshot && snapshotTaken) {
+      // Save previous round (if we had one, snapshot taken, and prices valid)
+      const hasValidPrices = roundUpPriceAtStart > 0.01 && roundDownPriceAtStart > 0.01;
+      if (currentSlug && roundStartPrice > 0 && startSignalSnapshot && snapshotTaken && !hasValidPrices) {
+        console.log(`[TrainingLoop] Skipping save — invalid prices: Up:${roundUpPriceAtStart} Down:${roundDownPriceAtStart}`);
+      }
+      if (currentSlug && roundStartPrice > 0 && startSignalSnapshot && snapshotTaken && hasValidPrices) {
         const endPrice = serverBinanceWS.lastTradePrice;
 
         // Determine result from Polymarket prices
@@ -250,6 +269,19 @@ async function pollRound(): Promise<void> {
         let hypPnl = 0;
         let hypEv = 0;
 
+        // Stop-loss guards
+        const hypBalance = getHypotheticalBalance();
+        const dailyPnl = getHypotheticalDailyPnl();
+        const balanceStopLoss = hypBalance < 40; // Total balance below $40 → stop
+        const dailyStopLoss = dailyPnl < -10;    // Daily P&L below -$10 → stop
+
+        if (balanceStopLoss) {
+          console.log(`[TrainingLoop] STOP-LOSS: Balance $${hypBalance.toFixed(2)} < $40`);
+        }
+        if (dailyStopLoss) {
+          console.log(`[TrainingLoop] DAILY STOP: Today P&L $${dailyPnl.toFixed(2)} < -$10`);
+        }
+
         // Price snapshot guard — never trade without valid prices
         const pricesValid = roundUpPriceAtStart > 0 && roundDownPriceAtStart > 0
           && (roundUpPriceAtStart + roundDownPriceAtStart) > 0.9;
@@ -265,7 +297,7 @@ async function pollRound(): Promise<void> {
         const dir = score > 0 ? 'UP' : 'DOWN';
         const minScoreForDir = dir === 'UP' ? 20 : 15; // UP needs stronger signal
 
-        if (pricesValid && Math.abs(score) > minScoreForDir && conf > 20 && confNotOverfit && feeOk && spreadOk) {
+        if (pricesValid && !balanceStopLoss && !dailyStopLoss && Math.abs(score) > minScoreForDir && conf > 20 && confNotOverfit && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
           // Use START prices for decision, not resolved end prices
           const price = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
