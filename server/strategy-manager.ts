@@ -105,10 +105,14 @@ const STRATEGIES: Array<{
 
       if (isExtremeUp && signal.finalScore < -10) {
         // Market says UP but our signals say DOWN → contrarian BUY_DOWN
+        // Entry price is downPrice — must be above stop-loss (15¢ min)
+        if (downPrice < 0.15) return { decision: 'SKIP', betPct: 0 };
         return { decision: 'BUY_DOWN', betPct: 0.02 };
       }
       if (isExtremeDn && signal.finalScore > 10) {
         // Market says DOWN but our signals say UP → contrarian BUY_UP
+        // Entry price is upPrice — must be above stop-loss (15¢ min)
+        if (upPrice < 0.15) return { decision: 'SKIP', betPct: 0 };
         return { decision: 'BUY_UP', betPct: 0.02 };
       }
       return { decision: 'SKIP', betPct: 0 };
