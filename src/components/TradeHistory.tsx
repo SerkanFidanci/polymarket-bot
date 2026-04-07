@@ -63,15 +63,16 @@ export function TradeHistory() {
         </div>
       </div>
 
-      <div className="space-y-0.5 max-h-48 overflow-y-auto">
+      <div className="space-y-0.5 max-h-56 overflow-y-auto">
         {trades.map(t => {
           const dir = t.hypothetical_decision === 'BUY_UP' ? 'UP' : 'DOWN';
           const won = dir === t.actual_result;
           const time = t.round_start_time.slice(11, 16);
           const date = t.round_start_time.slice(5, 10);
-          const pmPrice = dir === 'UP'
-            ? t.polymarket_up_price
-            : t.polymarket_down_price;
+          // Entry price = the token we bought
+          const entryPrice = dir === 'UP' ? t.polymarket_up_price : t.polymarket_down_price;
+          // Exit price = $1 if won, $0 if lost (binary market resolution)
+          const exitPrice = won ? 1.0 : 0.0;
 
           return (
             <div key={t.id} className="flex items-center justify-between text-[10px] mono py-0.5">
@@ -83,18 +84,20 @@ export function TradeHistory() {
                   {dir}
                 </span>
                 <span className="text-[var(--color-text-dim)]">{date} {time}</span>
-                {pmPrice != null && (
-                  <span className="text-[var(--color-text-dim)]">@{(pmPrice * 100).toFixed(0)}c</span>
+                {entryPrice != null && (
+                  <span className="text-white">
+                    {(entryPrice * 100).toFixed(0)}c<span className="text-[var(--color-text-dim)]">{won ? `\u2192${(exitPrice * 100).toFixed(0)}c` : '\u2192 0c'}</span>
+                  </span>
                 )}
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[var(--color-text-dim)]">
-                  EV:{t.hypothetical_ev?.toFixed(3) ?? '0'}
+                  ${(t.hypothetical_bet_size || 2.5).toFixed(1)}
                 </span>
                 <span className="text-[var(--color-text-dim)]">
-                  C:{t.confidence?.toFixed(0)}
+                  EV:{t.hypothetical_ev?.toFixed(2) ?? '0'}
                 </span>
-                <span className={`font-medium ${(t.hypothetical_pnl || 0) >= 0 ? 'text-[#26a69a]' : 'text-[#ef5350]'}`}>
+                <span className={`font-medium w-14 text-right ${(t.hypothetical_pnl || 0) >= 0 ? 'text-[#26a69a]' : 'text-[#ef5350]'}`}>
                   {(t.hypothetical_pnl || 0) >= 0 ? '+' : ''}${(t.hypothetical_pnl || 0).toFixed(2)}
                 </span>
               </div>
