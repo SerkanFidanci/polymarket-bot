@@ -146,7 +146,12 @@ function simulateWithWeights(
   weights: SignalWeights,
   config: ThresholdConfig = { minConfidence: 20, minSignalStrength: 15, kellyFraction: 0.25, maxBetPercent: 0.05 }
 ): { pnl: number; sharpe: number; wins: number; losses: number; skips: number } {
-  let bankroll = 50;
+  const INITIAL_BANKROLL = 50;
+  const MAX_BANKROLL = 10_000;   // Cap at 200x initial to prevent exponential blowup
+  const MAX_BET_SIZE = 500;      // Hard cap on any single bet
+  const MIN_BANKROLL = 1;        // Floor — stop sim if bankroll drops below $1
+
+  let bankroll = INITIAL_BANKROLL;
   let totalPnl = 0;
   const dailyPnls: number[] = [];
   let dayPnl = 0;
@@ -181,6 +186,9 @@ function simulateWithWeights(
     if (activeSignals.length >= 7 && agreement > 0.8) confidence *= 1.3;
     if (activeSignals.length < 3) confidence = 0;
 
+    // Overconfidence cap — matches DecisionMaker live logic
+    if (confidence > 50) { skips++; continue; }
+
     // Decision
     if (confidence < config.minConfidence || Math.abs(score) < config.minSignalStrength) {
       skips++;
@@ -199,14 +207,16 @@ function simulateWithWeights(
     const b = winAmount / loseAmount;
     const kelly = ((b * ourProb) - (1 - ourProb)) / b;
     const halfKelly = kelly * config.kellyFraction;
+    // Cap bet size to prevent exponential growth
     let betSize = clamp(bankroll * halfKelly, 1, bankroll * config.maxBetPercent);
+    betSize = Math.min(betSize, MAX_BET_SIZE);
 
     if (betSize > bankroll || betSize < 1) { skips++; continue; }
 
     const won = direction === round.actual_result;
     const pnl = won ? betSize * (winAmount / loseAmount) : -betSize;
 
-    bankroll += pnl;
+    bankroll = Math.min(bankroll + pnl, MAX_BANKROLL);
     totalPnl += pnl;
     dayPnl += pnl;
 
@@ -218,7 +228,8 @@ function simulateWithWeights(
       dayPnl = 0;
     }
 
-    if (bankroll <= 0) break;
+    // Bankroll floor — stop if below $1
+    if (bankroll < MIN_BANKROLL) break;
   }
   if (dayPnl !== 0) dailyPnls.push(dayPnl);
 
@@ -470,9 +481,10 @@ export async function runOptimizationCycle(
 
   // Compare with current weights
   const currentResult = simulateWithWeights(rounds, currentWeights);
-  const improvement = currentResult.pnl === 0
+  const rawImprovement = currentResult.pnl === 0
     ? (optimResult.simulatedPnl > 0 ? 100 : 0)
     : ((optimResult.simulatedPnl - currentResult.pnl) / Math.abs(currentResult.pnl)) * 100;
+  const improvement = Math.min(rawImprovement, 1000); // Cap at 1000% to prevent absurd display values
 
   if (optimResult.simulatedPnl > currentResult.pnl) {
     const gradualWeights = applyGradualUpdate(currentWeights, optimResult.weights);
