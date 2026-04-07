@@ -192,6 +192,7 @@ const STRATEGIES: Array<{
 // ===== OPEN POSITIONS =====
 
 const openPositions = new Map<string, OpenPos>();
+const tradedThisRound = new Set<string>(); // prevent re-entry after early exit
 
 // ===== CORE FUNCTIONS =====
 
@@ -217,6 +218,9 @@ export const strategyManager = {
       // Skip if already has open position this round
       if (openPositions.has(strat.name)) continue;
 
+      // Prevent re-entry in same round (after early exit)
+      if (tradedThisRound.has(strat.name)) continue;
+
       const balance = getBalance(strat.name);
       if (balance < 1) continue; // busted
 
@@ -229,7 +233,8 @@ export const strategyManager = {
 
       const betSize = Math.max(1, Math.min(balance * decision.betPct, balance * 0.10));
 
-      // Open position
+      // Open position — mark as traded this round
+      tradedThisRound.add(strat.name);
       openPositions.set(strat.name, {
         strategyName: strat.name,
         roundId: ctx.roundId,
@@ -262,7 +267,7 @@ export const strategyManager = {
 
       const exitResult = strat.shouldExit(pos, currentToken, timeLeftSec, signal);
       if (exitResult && exitResult.shouldExit) {
-        resolvePosition(strat.name, pos, exitResult.exitPrice, exitResult.reason);
+        closePosition(strat.name, pos, exitResult.exitPrice, exitResult.reason, pos.direction);
       }
     }
   },
@@ -275,11 +280,12 @@ export const strategyManager = {
 
       // Position still open → binary result
       const won = pos.direction === actualResult;
-      resolvePositionWithResult(strat.name, pos, won ? 1.0 : 0.0, 'held_to_expiry', actualResult);
+      closePosition(strat.name, pos, won ? 1.0 : 0.0, 'held_to_expiry', actualResult);
     }
 
-    // Clear all positions
+    // Clear all positions and round locks
     openPositions.clear();
+    tradedThisRound.clear();
   },
 
   getLeaderboard(): Array<{
@@ -333,19 +339,16 @@ export function setGlobalPrices(up: number, down: number): void {
   roundDownPriceGlobal = down;
 }
 
-function resolvePositionWithResult(stratName: string, pos: OpenPos, exitPrice: number, reason: string, actualResult: string): void {
+// Single function for ALL position closes — both early exit and held-to-expiry
+function closePosition(stratName: string, pos: OpenPos, exitPrice: number, reason: string, actualResult: string): void {
   const shares = pos.betSize / pos.entryPrice;
   const pnl = (exitPrice - pos.entryPrice) * shares;
 
-  // Save trade — actual_result is the ROUND result, not the position direction
+  // Save trade
   db.prepare(`
     INSERT INTO strategy_trades (round_id, strategy_name, decision, entry_price, bet_size, exit_price, exit_reason, pnl, actual_result)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(pos.roundId, stratName, 'BUY_' + pos.direction, pos.entryPrice, pos.betSize, exitPrice, reason, pnl, actualResult);}
-
-// For early exits (no actual_result yet — use direction as placeholder)
-function resolvePosition(stratName: string, pos: OpenPos, exitPrice: number, reason: string): void {
-  resolvePositionWithResult(stratName, pos, exitPrice, reason, pos.direction);
+  `).run(pos.roundId, stratName, 'BUY_' + pos.direction, pos.entryPrice, pos.betSize, exitPrice, reason, pnl, actualResult);
 
   // Update balance
   ensureBalance(stratName);
