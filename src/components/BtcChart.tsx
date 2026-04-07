@@ -1,12 +1,89 @@
-import { useEffect, useRef } from 'react';
-import { createChart, type IChartApi, type ISeriesApi, ColorType, CandlestickSeries, LineSeries } from 'lightweight-charts';
+import { useEffect, useRef, useCallback } from 'react';
+import { createChart, type IChartApi, type ISeriesApi, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
+
+interface TradeMarker {
+  time: number; // unix seconds
+  direction: 'UP' | 'DOWN';
+  strategy: string;
+  pnl: number;
+  won: boolean;
+}
 
 export function BtcChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const ema5Ref = useRef<ISeriesApi<'Line'> | null>(null);
-  const ema13Ref = useRef<ISeriesApi<'Line'> | null>(null);
+  const markersRef = useRef<ReturnType<typeof createSeriesMarkers> | null>(null);
+
+  const loadMarkers = useCallback(async (candles: ISeriesApi<'Candlestick'>) => {
+    try {
+      // Fetch all strategy trades + baseline trades
+      const [blRes, ...stratRes] = await Promise.all([
+        fetch('/api/training-rounds/trades'),
+        ...['AGGRESSIVE', 'SELECTIVE', 'TREND_FOLLOWER', 'LATE_ENTRY'].map(s =>
+          fetch(`/api/strategies/${s}/trades`)
+        ),
+      ]);
+
+      const markers: TradeMarker[] = [];
+
+      // Baseline trades
+      if (blRes.ok) {
+        const trades = await blRes.json() as Array<{
+          round_start_time: string; hypothetical_decision: string;
+          actual_result: string; hypothetical_pnl: number;
+        }>;
+        trades.forEach(t => {
+          const dir = t.hypothetical_decision === 'BUY_UP' ? 'UP' : 'DOWN';
+          markers.push({
+            time: Math.floor(new Date(t.round_start_time).getTime() / 1000),
+            direction: dir as 'UP' | 'DOWN',
+            strategy: 'BASE',
+            pnl: t.hypothetical_pnl || 0,
+            won: dir === t.actual_result,
+          });
+        });
+      }
+
+      // Strategy trades
+      const stratNames = ['AGGRESSIVE', 'SELECTIVE', 'TREND_FOLLOWER', 'LATE_ENTRY'];
+      for (let i = 0; i < stratRes.length; i++) {
+        if (!stratRes[i]!.ok) continue;
+        const trades = await stratRes[i]!.json() as Array<{
+          created_at: string; decision: string;
+          actual_result: string; pnl: number; strategy_name: string;
+        }>;
+        trades.forEach(t => {
+          const dir = t.decision === 'BUY_UP' ? 'UP' : 'DOWN';
+          markers.push({
+            time: Math.floor(new Date(t.created_at + 'Z').getTime() / 1000),
+            direction: dir as 'UP' | 'DOWN',
+            strategy: stratNames[i]!.slice(0, 4),
+            pnl: t.pnl || 0,
+            won: t.pnl >= 0,
+          });
+        });
+      }
+
+      if (markers.length === 0) return;
+
+      // Convert to lightweight-charts markers
+      const chartMarkers = markers
+        .sort((a, b) => a.time - b.time)
+        .map(m => ({
+          time: m.time as unknown as import('lightweight-charts').UTCTimestamp,
+          position: m.direction === 'UP' ? 'belowBar' as const : 'aboveBar' as const,
+          color: m.won ? '#22c55e' : '#ef4444',
+          shape: m.direction === 'UP' ? 'arrowUp' as const : 'arrowDown' as const,
+          text: `${m.strategy} ${m.pnl >= 0 ? '+' : ''}$${m.pnl.toFixed(1)}`,
+        }));
+
+      /* eslint-disable @typescript-eslint/no-explicit-any */
+      if (markersRef.current) { (markersRef.current as any).setMarkers(chartMarkers); }
+      else { markersRef.current = (createSeriesMarkers as any)(candles, chartMarkers); }
+      /* eslint-enable @typescript-eslint/no-explicit-any */
+    } catch { /* silent */ }
+  }, []);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -31,8 +108,6 @@ export function BtcChart() {
 
     const ema5 = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     const ema13 = chart.addSeries(LineSeries, { color: '#8b5cf6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
-    ema5Ref.current = ema5;
-    ema13Ref.current = ema13;
 
     // Fetch initial klines
     fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=120')
@@ -47,15 +122,18 @@ export function BtcChart() {
         }));
         candles.setData(bars);
 
-        // Compute EMAs
         const closes = bars.map(b => b.close);
-        const ema5Data = computeEMA(closes, 5).map((v, i) => ({ time: bars[i]!.time, value: v }));
-        const ema13Data = computeEMA(closes, 13).map((v, i) => ({ time: bars[i]!.time, value: v }));
-        ema5.setData(ema5Data);
-        ema13.setData(ema13Data);
+        ema5.setData(computeEMA(closes, 5).map((v, i) => ({ time: bars[i]!.time, value: v })));
+        ema13.setData(computeEMA(closes, 13).map((v, i) => ({ time: bars[i]!.time, value: v })));
         chart.timeScale().fitContent();
+
+        // Load trade markers
+        loadMarkers(candles);
       })
       .catch(() => {});
+
+    // Refresh markers every 30s
+    const markerInterval = setInterval(() => { if (candleRef.current) loadMarkers(candleRef.current); }, 30000);
 
     // Live updates via WS
     const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@kline_1m');
@@ -77,16 +155,18 @@ export function BtcChart() {
     const onResize = () => { chart.applyOptions({ width: containerRef.current?.clientWidth ?? 600 }); };
     window.addEventListener('resize', onResize);
 
-    return () => { ws.close(); chart.remove(); window.removeEventListener('resize', onResize); };
-  }, []);
+    return () => { ws.close(); chart.remove(); clearInterval(markerInterval); window.removeEventListener('resize', onResize); };
+  }, [loadMarkers]);
 
   return (
     <div className="bg-[var(--color-surface)] rounded-xl border border-[var(--color-border)] p-2 overflow-hidden">
       <div className="text-[10px] text-[var(--color-text-dim)] px-2 pb-1 flex items-center justify-between">
         <span>BTCUSDT 1m</span>
-        <span className="flex gap-2">
+        <span className="flex gap-3">
           <span style={{ color: '#f59e0b' }}>EMA5</span>
           <span style={{ color: '#8b5cf6' }}>EMA13</span>
+          <span className="text-[#22c55e]">▲ WIN</span>
+          <span className="text-[#ef4444]">▼ LOSS</span>
         </span>
       </div>
       <div ref={containerRef} />
