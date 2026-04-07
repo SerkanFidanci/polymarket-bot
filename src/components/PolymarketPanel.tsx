@@ -29,8 +29,8 @@ export function PolymarketPanel({ round, live }: { round: PMRound | null; live: 
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <PriceBox label="UP" price={round.priceUp} color="var(--color-up)" />
-            <PriceBox label="DOWN" price={round.priceDown} color="var(--color-down)" />
+            <PriceBox label="UP" price={live?.training.roundUpPrice || round.priceUp} color="var(--color-up)" />
+            <PriceBox label="DOWN" price={live?.training.roundDownPrice || round.priceDown} color="var(--color-down)" />
           </div>
 
           <div>
