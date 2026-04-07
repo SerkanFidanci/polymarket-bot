@@ -378,7 +378,7 @@ async function pollRound(): Promise<void> {
         const roundEndTimeFixed = new Date(startMs + 300000).toISOString();
 
         // Final price guard — abort entire save if prices invalid
-        if (roundUpPriceAtStart < 0.02 || roundDownPriceAtStart < 0.02) {
+        if (!roundUpPriceAtStart || !roundDownPriceAtStart || roundUpPriceAtStart < 0.02 || roundDownPriceAtStart < 0.02) {
           console.log(`[TrainingLoop] ABORT save — prices invalid: Up:${roundUpPriceAtStart} Down:${roundDownPriceAtStart}`);
         } else {
         // === BEGIN SAVE BLOCK (only executes with valid prices) ===

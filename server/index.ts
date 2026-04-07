@@ -160,7 +160,7 @@ app.post('/api/training-rounds/reset', (_req, res) => {
   }
 });
 
-// Hypothetical trades (BUY only, not SKIP)
+// Hypothetical trades (BUY only, not SKIP, valid prices only)
 app.get('/api/training-rounds/trades', (_req, res) => {
   try {
     const rows = db.prepare(`
@@ -169,6 +169,8 @@ app.get('/api/training-rounds/trades', (_req, res) => {
              confidence, final_score, polymarket_up_price, polymarket_down_price
       FROM training_rounds
       WHERE hypothetical_decision != 'SKIP'
+        AND polymarket_up_price IS NOT NULL
+        AND polymarket_up_price > 0.01
       ORDER BY id DESC LIMIT 50
     `).all();
     res.json(rows);
