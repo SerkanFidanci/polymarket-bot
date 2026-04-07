@@ -328,17 +328,20 @@ async function pollRound(): Promise<void> {
         const feeOk = roundFeeRate <= 0.03;
         const spreadOk = roundSpread <= 0.05;
 
-        // Overconfidence cap: confidence > 50 = overfit, skip
-        const confNotOverfit = conf <= 50;
+        // Overconfidence cap: data shows conf>40 = 20% WR
+        const confNotOverfit = conf <= 40;
 
-        // BUY_UP needs higher score (UP bias fix: UP WR=38% vs DOWN WR=56%)
+        // Score threshold: data shows |score|>=20 sweet spot
         const dir = score > 0 ? 'UP' : 'DOWN';
-        const minScoreForDir = dir === 'UP' ? 20 : 15; // UP needs stronger signal
+        const minScoreForDir = 20; // Same for UP and DOWN (data: 25+ = 54% WR)
 
-        if (pricesValid && !balanceStopLoss && !dailyStopLoss && Math.abs(score) > minScoreForDir && conf > 15 && confNotOverfit && feeOk && spreadOk) {
+        // Entry price floor: data shows <30c = 0% WR
+        const entryPrice = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
+        const priceInRange = entryPrice >= 0.30 && entryPrice <= 0.70; // sweet spot 30-70c
+
+        if (pricesValid && priceInRange && !balanceStopLoss && !dailyStopLoss && Math.abs(score) > minScoreForDir && conf > 15 && confNotOverfit && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
-          // Use START prices for decision, not resolved end prices
-          const price = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
+          const price = entryPrice;
           const winAmt = 1 - price;
           const loseAmt = price;
           const ourProb = Math.min(0.85, 0.5 + Math.abs(score) / 200);
@@ -361,13 +364,14 @@ async function pollRound(): Promise<void> {
             if (hypExitReason && hypExitPrice > 0) {
               // Early exit — PnL based on exit price, not round result
               const shares = hypBetSize / price;
-              hypPnl = (hypExitPrice - price) * shares;
-              console.log(`[TrainingLoop] Hyp trade exited early: ${hypExitReason} | Entry:${(price*100).toFixed(0)}¢ Exit:${(hypExitPrice*100).toFixed(0)}¢ PnL:$${hypPnl.toFixed(2)}`);
-            } else {
-              // Held to expiry — binary result
-              const won = dir === result;
-              hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
+              // Exit manager disabled for BASELINE — data shows it destroys $368 of value
+              // Token dips mid-round then recovers, stop-loss panics on temporary drawdowns
+              // HOLD TO EXPIRY instead — binary result is the only reliable exit
+              void hypExitReason; void hypExitPrice; // acknowledged but ignored
             }
+            // Always hold to expiry — binary result
+            const won = dir === result;
+            hypPnl = won ? hypBetSize * (winAmt / loseAmt) - (hypBetSize * roundFeeRate) : -hypBetSize;
           } else {
             hypDecision = 'SKIP';
           }

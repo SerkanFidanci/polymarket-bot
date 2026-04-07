@@ -57,16 +57,16 @@ const STRATEGIES: Array<{
       if (absScore > 15 && signal.confidence > 20) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
-        if (price < 0.15) return { decision: 'SKIP', betPct: 0 }; // min entry 15c
+        if (price < 0.30) return { decision: 'SKIP', betPct: 0 }; // data: <30c = 0% WR
         const prob = Math.min(0.85, 0.5 + absScore / 200);
         const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
         if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.02 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(pos, tokenPrice) {
-      if (tokenPrice < 0.15) return { shouldExit: true, reason: 'stop_loss_15c', exitPrice: tokenPrice };
-      if (tokenPrice < pos.entryPrice * 0.40) return { shouldExit: true, reason: 'stop_loss_60pct', exitPrice: tokenPrice };
+    shouldExit() {
+      // Hold to expiry — data shows exit manager destroys value on binary markets
+      // Tokens dip mid-round then recover; stop-loss panics on temporary noise
       return null;
     },
   },
@@ -123,12 +123,8 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(pos, tokenPrice) {
-      // Wider trailing stop — 25% (was 15%, too tight for cheap tokens)
-      if (pos.peakPrice > pos.entryPrice) {
-        const drop = (pos.peakPrice - tokenPrice) / pos.peakPrice;
-        if (drop >= 0.25) return { shouldExit: true, reason: 'trailing_stop_25pct', exitPrice: tokenPrice };
-      }
+    shouldExit() {
+      // Hold to expiry — trailing stops destroy value on binary markets
       return null;
     },
   },

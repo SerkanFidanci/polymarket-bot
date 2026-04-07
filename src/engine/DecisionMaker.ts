@@ -76,15 +76,15 @@ export function makeDecision(ctx: DecisionContext): Decision {
   // ===== DYNAMIC THRESHOLDS =====
 
   let minConfidence = 15;
-  let minScore = 15;
+  let minScore = 20; // Data: |score|>=20 sweet spot (54%+ WR)
 
   if (highVolatility) {
-    minConfidence = 45;
+    minConfidence = 35;
     minScore = 25;
   }
 
   if (lowLiquidity || isWeekendLowLiquidity()) {
-    minConfidence = Math.max(minConfidence, 30);
+    minConfidence = Math.max(minConfidence, 25);
     minScore = Math.max(minScore, 20);
   }
 
@@ -103,9 +103,9 @@ export function makeDecision(ctx: DecisionContext): Decision {
     minConfidence += 15;
   }
 
-  // Overconfidence cap: data shows C>50 = 30% WR (overfit)
-  if (signal.confidence > 50) {
-    return skip(`Overconfidence cap (${signal.confidence.toFixed(0)} > 50)`, now);
+  // Overconfidence cap: data shows C>40 = 20% WR
+  if (signal.confidence > 40) {
+    return skip(`Overconfidence cap (${signal.confidence.toFixed(0)} > 40)`, now);
   }
 
   // Check thresholds
@@ -121,14 +121,12 @@ export function makeDecision(ctx: DecisionContext): Decision {
 
   const direction: Direction = signal.finalScore > 0 ? 'UP' : 'DOWN';
 
-  // BUY_UP bias fix: UP trades WR=38% vs DOWN WR=56%
-  // Require stronger score for UP direction
-  const dirMinScore = direction === 'UP' ? 20 : minScore;
-  if (Math.abs(signal.finalScore) < dirMinScore) {
-    return skip(`Weak ${direction} signal (|${signal.finalScore.toFixed(1)}| < ${dirMinScore})`, now);
-  }
-
   const price = direction === 'UP' ? priceUp : priceDown;
+
+  // Entry price floor: data shows <30c = 0% WR, >70c = thin edge
+  if (price < 0.30 || price > 0.70) {
+    return skip(`Price out of range (${(price * 100).toFixed(0)}¢, need 30-70¢)`, now);
+  }
   const ourProbability = clamp(0.5 + (Math.abs(signal.finalScore) / 200), 0.51, 0.85);
 
   // ===== EV CALCULATION (with fee) =====
