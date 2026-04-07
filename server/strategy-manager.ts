@@ -42,42 +42,43 @@ interface RoundContext {
 
 const STRATEGIES: Array<{
   name: string;
+  disabled?: boolean;
   shouldEnter: (ctx: RoundContext) => StrategyDecision;
   shouldExit: (pos: OpenPos, tokenPrice: number, timeLeftSec: number, signal: CombinedSignal | null) => ExitResult | null;
 }> = [
   {
-    // 1. AGGRESSIVE — lots of trades, small bets, hold to expiry
+    // 1. AGGRESSIVE — medium threshold, stop-loss protected
+    // CHANGED: score 10→15, conf 15→20, bet 3%→2%, min entry 15c
     name: 'AGGRESSIVE',
     shouldEnter(ctx) {
       const { signal, upPrice, downPrice } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
       const absScore = Math.abs(signal.finalScore);
-      if (absScore > 10 && signal.confidence > 15) {
+      if (absScore > 15 && signal.confidence > 20) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
-        // EV check
+        if (price < 0.15) return { decision: 'SKIP', betPct: 0 }; // min entry 15c
         const prob = Math.min(0.85, 0.5 + absScore / 200);
         const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
-        if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
+        if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.02 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(pos, tokenPrice) {
-      // Stop-loss: exit if token drops below 15c (prevent full wipeout)
       if (tokenPrice < 0.15) return { shouldExit: true, reason: 'stop_loss_15c', exitPrice: tokenPrice };
-      // Also exit if dropped 60% from entry
       if (tokenPrice < pos.entryPrice * 0.40) return { shouldExit: true, reason: 'stop_loss_60pct', exitPrice: tokenPrice };
       return null;
     },
   },
   {
-    // 2. SELECTIVE — few trades, big bets, trailing stop
+    // 2. SELECTIVE — high quality, hold to expiry (no trailing stop)
+    // CHANGED: score 25→20, conf 35→30, cap 50→55, trailing stop REMOVED, abs floor 5c added
     name: 'SELECTIVE',
     shouldEnter(ctx) {
       const { signal, upPrice, downPrice } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
       const absScore = Math.abs(signal.finalScore);
-      if (absScore > 25 && signal.confidence > 35 && signal.confidence <= 50) {
+      if (absScore > 20 && signal.confidence > 30 && signal.confidence <= 55) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
         const prob = Math.min(0.85, 0.5 + absScore / 200);
@@ -86,65 +87,33 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(pos, tokenPrice) {
-      // Trailing stop 20%
-      if (pos.peakPrice > pos.entryPrice) {
-        const drop = (pos.peakPrice - tokenPrice) / pos.peakPrice;
-        if (drop >= 0.20) return { shouldExit: true, reason: 'trailing_stop_20pct', exitPrice: tokenPrice };
-      }
+    shouldExit(_pos, tokenPrice) {
+      // Only absolute floor — no trailing stop (kills binary market winners)
+      if (tokenPrice < 0.05) return { shouldExit: true, reason: 'abs_floor_5c', exitPrice: tokenPrice };
       return null;
     },
   },
   {
-    // 3. CONTRARIAN — bet against strong market consensus
+    // 3. CONTRARIAN — DISABLED (market correct 98.6% at extremes, 0% win rate)
     name: 'CONTRARIAN',
-    shouldEnter(ctx) {
-      const { signal, upPrice, downPrice } = ctx;
-      if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
-
-      // Only enter when market is very confident (extreme prices)
-      const isExtremeUp = upPrice > 0.75; // Market says UP strongly
-      const isExtremeDn = downPrice > 0.75; // Market says DOWN strongly
-
-      if (isExtremeUp && signal.finalScore < -10) {
-        // Market says UP but our signals say DOWN → contrarian BUY_DOWN
-        // Entry price is downPrice — must be above stop-loss (15¢ min)
-        if (downPrice < 0.15) return { decision: 'SKIP', betPct: 0 };
-        return { decision: 'BUY_DOWN', betPct: 0.02 };
-      }
-      if (isExtremeDn && signal.finalScore > 10) {
-        // Market says DOWN but our signals say UP → contrarian BUY_UP
-        // Entry price is upPrice — must be above stop-loss (15¢ min)
-        if (upPrice < 0.15) return { decision: 'SKIP', betPct: 0 };
-        return { decision: 'BUY_UP', betPct: 0.02 };
-      }
-      return { decision: 'SKIP', betPct: 0 };
-    },
-    shouldExit(pos, tokenPrice) {
-      // Absolute stop 10¢, absolute target 90¢
-      if (tokenPrice < 0.10) return { shouldExit: true, reason: 'abs_stop_10c', exitPrice: tokenPrice };
-      if (tokenPrice > 0.90) return { shouldExit: true, reason: 'abs_target_90c', exitPrice: tokenPrice };
-      return null;
-    },
+    disabled: true,
+    shouldEnter() { return { decision: 'SKIP', betPct: 0 }; },
+    shouldExit() { return null; },
   },
   {
-    // 4. TREND_FOLLOWER — only trade when clear trend
+    // 4. TREND_FOLLOWER — EMA+VWAP alignment, wider trailing stop
+    // CHANGED: trailing stop 15%→25%
     name: 'TREND_FOLLOWER',
     shouldEnter(ctx) {
       const { signal, upPrice, downPrice } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
-
-      // Check EMA crossover from signal details
       const emaMacd = signal.signals.ema_macd;
       const vwapBb = signal.signals.vwap_bb;
-
-      // Need strong trend: both ema_macd and vwap_bb agree with score
       const trendAligned = emaMacd && vwapBb
         && Math.sign(emaMacd.score) === Math.sign(signal.finalScore)
         && Math.sign(vwapBb.score) === Math.sign(signal.finalScore)
         && Math.abs(emaMacd.score) > 15
         && signal.confidence > 25;
-
       if (trendAligned) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
@@ -155,37 +124,37 @@ const STRATEGIES: Array<{
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(pos, tokenPrice) {
-      // Trailing stop 15%
+      // Wider trailing stop — 25% (was 15%, too tight for cheap tokens)
       if (pos.peakPrice > pos.entryPrice) {
         const drop = (pos.peakPrice - tokenPrice) / pos.peakPrice;
-        if (drop >= 0.15) return { shouldExit: true, reason: 'trailing_stop_15pct', exitPrice: tokenPrice };
+        if (drop >= 0.25) return { shouldExit: true, reason: 'trailing_stop_25pct', exitPrice: tokenPrice };
       }
       return null;
     },
   },
   {
-    // 5. LATE_ENTRY — enter in last 90s when uncertainty reduced
+    // 5. LATE_ENTRY — momentum trade, 15s exit (best performer)
+    // CHANGED: score 15→12, price range 30-70→25-75, entry window 210→180
     name: 'LATE_ENTRY',
     shouldEnter(ctx) {
       const { signal, upPrice, downPrice, timeIntoRound } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
 
-      // Only enter in last 90 seconds (210-300s into round)
-      if (timeIntoRound < 210) return { decision: 'SKIP', betPct: 0 };
+      // Enter from 180s (was 210s) — more time for momentum
+      if (timeIntoRound < 180) return { decision: 'SKIP', betPct: 0 };
 
-      // Price must be in uncertain zone (30-70¢)
+      // Wider price range: 25-75c (was 30-70c)
       const price = signal.finalScore > 0 ? upPrice : downPrice;
-      if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 };
+      if (price < 0.25 || price > 0.75) return { decision: 'SKIP', betPct: 0 };
 
       const absScore = Math.abs(signal.finalScore);
-      if (absScore > 15 && signal.confidence > 20) {
+      if (absScore > 12 && signal.confidence > 15) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(_pos, _tokenPrice, timeLeftSec) {
-      // Exit in last 15 seconds
       if (timeLeftSec <= 15) return { shouldExit: true, reason: 'time_15s_exit', exitPrice: _tokenPrice };
       return null;
     },
@@ -216,6 +185,7 @@ export const strategyManager = {
   // Called at round snapshot (60s in) — strategies decide entry
   evaluateEntries(ctx: RoundContext): void {
     for (const strat of STRATEGIES) {
+      if (strat.disabled) continue;
       ensureBalance(strat.name);
 
       // Skip if already has open position this round

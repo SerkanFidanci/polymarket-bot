@@ -536,7 +536,7 @@ async function pollRound(): Promise<void> {
 
       // Late entry strategies: evaluate during round (after 210s)
       const timeIntoRound = (Date.now() - round.startTime) / 1000;
-      if (timeIntoRound >= 210 && timeIntoRound <= 290 && roundUpPrice > 0.01 && roundDownPrice > 0.01) {
+      if (timeIntoRound >= 180 && timeIntoRound <= 290 && roundUpPrice > 0.01 && roundDownPrice > 0.01) {
         const signal = serverSignalEngine.getLastSignal();
         if (signal) {
           strategyManager.evaluateEntries({
