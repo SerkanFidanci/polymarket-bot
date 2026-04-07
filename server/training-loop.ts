@@ -377,14 +377,11 @@ async function pollRound(): Promise<void> {
         const startMs = new Date(roundStartTime).getTime();
         const roundEndTimeFixed = new Date(startMs + 300000).toISOString();
 
-        // Final price guard before DB write
-        if (!roundUpPriceAtStart || !roundDownPriceAtStart || roundUpPriceAtStart < 0.01 || roundDownPriceAtStart < 0.01) {
-          console.log(`[TrainingLoop] BLOCKED save — prices still invalid at write time: Up:${roundUpPriceAtStart} Down:${roundDownPriceAtStart}`);
-          hypDecision = 'SKIP';
-          hypEv = 0;
-          hypBetSize = 0;
-          hypPnl = 0;
-        }
+        // Final price guard — abort entire save if prices invalid
+        if (roundUpPriceAtStart < 0.02 || roundDownPriceAtStart < 0.02) {
+          console.log(`[TrainingLoop] ABORT save — prices invalid: Up:${roundUpPriceAtStart} Down:${roundDownPriceAtStart}`);
+        } else {
+        // === BEGIN SAVE BLOCK (only executes with valid prices) ===
 
         const roundData = {
           roundStartTime,
@@ -392,8 +389,8 @@ async function pollRound(): Promise<void> {
           btcPriceStart: roundStartPrice,
           btcPriceEnd: endPrice,
           actualResult: result,
-          polymarketUpPrice: roundUpPriceAtStart || null,
-          polymarketDownPrice: roundDownPriceAtStart || null,
+          polymarketUpPrice: roundUpPriceAtStart,
+          polymarketDownPrice: roundDownPriceAtStart,
           signalOrderbook: startSignalSnapshot.signals.orderbook?.score ?? 0,
           signalEmaMacd: startSignalSnapshot.signals.ema_macd?.score ?? 0,
           signalRsiStoch: startSignalSnapshot.signals.rsi_stoch?.score ?? 0,
@@ -428,6 +425,9 @@ async function pollRound(): Promise<void> {
           // Resolve strategy positions for this round
           strategyManager.resolveRound(result, savedId as number);
         }
+
+        // === END SAVE BLOCK ===
+        } // end else (valid prices)
       }
 
       // Reset hypothetical position for new round
