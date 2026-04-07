@@ -71,8 +71,6 @@ export function TradeHistory() {
           const date = t.round_start_time.slice(5, 10);
           // Entry price = the token we bought
           const entryPrice = dir === 'UP' ? t.polymarket_up_price : t.polymarket_down_price;
-          // Exit price = $1 if won, $0 if lost (binary market resolution)
-          const exitPrice = won ? 1.0 : 0.0;
 
           return (
             <div key={t.id} className="flex items-center justify-between text-[10px] mono py-0.5">
@@ -84,16 +82,16 @@ export function TradeHistory() {
                   {dir}
                 </span>
                 <span className="text-[var(--color-text-dim)]">{date} {time}</span>
+                <span className="text-white">
+                  ${(t.hypothetical_bet_size || 2.5).toFixed(1)}
+                </span>
                 {entryPrice != null && (
-                  <span className="text-white">
-                    {(entryPrice * 100).toFixed(0)}c<span className="text-[var(--color-text-dim)]">{won ? `\u2192${(exitPrice * 100).toFixed(0)}c` : '\u2192 0c'}</span>
+                  <span className="text-[var(--color-text-dim)]">
+                    @{(entryPrice * 100).toFixed(0)}c{won ? '\u2192100c' : '\u21920c'}
                   </span>
                 )}
               </div>
               <div className="flex items-center gap-2">
-                <span className="text-[var(--color-text-dim)]">
-                  ${(t.hypothetical_bet_size || 2.5).toFixed(1)}
-                </span>
                 <span className="text-[var(--color-text-dim)]">
                   EV:{t.hypothetical_ev?.toFixed(2) ?? '0'}
                 </span>
