@@ -17,8 +17,8 @@ export function calculateOpenInterestSignal(
 
   let signal = 0;
 
-  // Lower thresholds for real-time detection (0.05% OI change is significant at 15s intervals)
-  const oiThresh = 0.05;
+  // Lower thresholds for real-time detection (15s polling → tiny changes)
+  const oiThresh = 0.005;
 
   // OI rising + price rising → new longs (bullish continuation)
   if (oiChangePct > oiThresh && priceChange > 0) signal = 40;

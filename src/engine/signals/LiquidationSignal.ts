@@ -1,8 +1,14 @@
 import type { SignalResult, LiquidationEvent } from '../../types/index.js';
-import { clamp } from '../../utils/math.js';
+// import { clamp } from '../../utils/math.js'; // unused — signal disabled
 
-export function calculateLiquidationSignal(liquidations: LiquidationEvent[]): SignalResult {
-  if (liquidations.length === 0) {
+export function calculateLiquidationSignal(_liquidations: LiquidationEvent[]): SignalResult {
+  // DISABLED: Binance forceOrder stream produces too little data for 5-min rounds.
+  // Liquidation events are rare and the $50K threshold is never met.
+  // Signal always returns 0 — weight should be set to 0.
+  return { name: 'liquidation', score: 0, confidence: 0, timestamp: Date.now(), details: { disabled: true } };
+
+  /* Original code preserved for reference:
+  if (_liquidations.length === 0) {
     return { name: 'liquidation', score: 0, confidence: 0, timestamp: Date.now(), details: {} };
   }
 
@@ -70,4 +76,5 @@ export function calculateLiquidationSignal(liquidations: LiquidationEvent[]): Si
       liqCount: liquidations.length,
     },
   };
+  */
 }
