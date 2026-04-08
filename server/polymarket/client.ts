@@ -128,25 +128,21 @@ export const polymarketClient = {
   },
 
   // Get fresh prices from CLOB /midpoint (real-time, not cached)
-  async refreshPrices(tokenIdUp: string, tokenIdDown: string, _slug?: string): Promise<{ priceUp: number; priceDown: number } | null> {
+  async refreshPrices(tokenIdUp: string, _tokenIdDown: string, _slug?: string): Promise<{ priceUp: number; priceDown: number } | null> {
     try {
-      const [upRes, downRes] = await Promise.allSettled([
-        fetch(`${CLOB_BASE}/midpoint?token_id=${tokenIdUp}`),
-        fetch(`${CLOB_BASE}/midpoint?token_id=${tokenIdDown}`),
-      ]);
+      // Single request — DOWN = 1 - UP (binary market complement)
+      const res = await fetch(`${CLOB_BASE}/midpoint?token_id=${tokenIdUp}`);
 
       let priceUp = 0.5;
       let priceDown = 0.5;
 
-      if (upRes.status === 'fulfilled' && upRes.value.ok) {
-        const data = await upRes.value.json() as { mid: string };
+      if (res.ok) {
+        const data = await res.json() as { mid: string };
         const mid = parseFloat(data.mid);
-        if (mid > 0 && mid < 1) priceUp = mid;
-      }
-      if (downRes.status === 'fulfilled' && downRes.value.ok) {
-        const data = await downRes.value.json() as { mid: string };
-        const mid = parseFloat(data.mid);
-        if (mid > 0 && mid < 1) priceDown = mid;
+        if (mid > 0 && mid < 1) {
+          priceUp = mid;
+          priceDown = Math.round((1 - mid) * 1000) / 1000; // complement
+        }
       }
 
       // Only log when price changes
