@@ -6,6 +6,7 @@ import { BtcChart } from './components/BtcChart';
 import { SignalPanel } from './components/SignalPanel';
 import { StrategyLeaderboard } from './components/StrategyLeaderboard';
 import { TradeHistory } from './components/TradeHistory';
+import { TradeLog } from './components/TradeLog';
 
 function App() {
   const { live, round, strategies, allStratTrades, fetchStratTrades } = useApiData();
@@ -42,11 +43,14 @@ function App() {
           </div>
         </div>
 
-        {/* Bottom: Trade History */}
+        {/* Bottom: Trade History (compact) */}
         <TradeHistory
           trades={allStratTrades}
           onFilterChange={(name) => fetchStratTrades(name)}
         />
+
+        {/* Trade Log (detailed) */}
+        <TradeLog />
       </div>
     </div>
   );

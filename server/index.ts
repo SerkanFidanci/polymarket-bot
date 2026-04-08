@@ -459,6 +459,53 @@ app.get('/api/strategies/:name/trades', (req, res) => {
   }
 });
 
+// Detailed trade log — all trades from all strategies with full context
+app.get('/api/trades/detailed', (_req, res) => {
+  try {
+    // BASELINE trades
+    const baseline = db.prepare(`
+      SELECT id, round_start_time as time, 'BASELINE' as strategy,
+        hypothetical_decision as decision, actual_result, hypothetical_pnl as pnl,
+        hypothetical_bet_size as bet_size, hypothetical_ev as ev,
+        polymarket_up_price as pm_up, polymarket_down_price as pm_down,
+        final_score as score, confidence as conf,
+        signal_orderbook, signal_ema_macd, signal_rsi_stoch, signal_vwap_bb,
+        signal_cvd, signal_whale, signal_funding, signal_open_interest, signal_ls_ratio,
+        btc_price_start, btc_price_end, exit_reason, exit_price,
+        polymarket_fee_rate as fee_rate
+      FROM training_rounds
+      WHERE hypothetical_decision != 'SKIP' AND polymarket_up_price > 0.01
+      ORDER BY id DESC LIMIT 50
+    `).all();
+
+    // Strategy trades with round data
+    const strategies = db.prepare(`
+      SELECT st.id, st.created_at as time, st.strategy_name as strategy,
+        st.decision, st.actual_result, st.pnl, st.bet_size, 0 as ev,
+        tr.polymarket_up_price as pm_up, tr.polymarket_down_price as pm_down,
+        tr.final_score as score, tr.confidence as conf,
+        tr.signal_orderbook, tr.signal_ema_macd, tr.signal_rsi_stoch, tr.signal_vwap_bb,
+        tr.signal_cvd, tr.signal_whale, tr.signal_funding, tr.signal_open_interest, tr.signal_ls_ratio,
+        tr.btc_price_start, tr.btc_price_end, st.exit_reason, st.exit_price,
+        tr.polymarket_fee_rate as fee_rate,
+        st.entry_price
+      FROM strategy_trades st
+      LEFT JOIN training_rounds tr ON st.round_id = tr.id
+      ORDER BY st.id DESC LIMIT 100
+    `).all();
+
+    const all = [...baseline, ...strategies].sort((a: any, b: any) => {
+      const ta = new Date(a.time).getTime();
+      const tb = new Date(b.time).getTime();
+      return tb - ta;
+    });
+
+    res.json(all.slice(0, 100));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 // Polymarket API proxy
 app.use('/api/polymarket', polymarketRoutes);
 
