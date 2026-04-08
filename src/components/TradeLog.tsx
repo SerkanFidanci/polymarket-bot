@@ -3,6 +3,7 @@ import { useState, useEffect } from 'react';
 interface DetailedTrade {
   id: number;
   time: string;
+  end_time: string;
   strategy: string;
   decision: string;
   actual_result: string;
@@ -87,7 +88,8 @@ function TradeCard({ trade: t, expanded, onToggle }: { trade: DetailedTrade; exp
   const won = dir === t.actual_result;
   const pnl = t.pnl || 0;
   const entryP = t.entry_price || (dir === 'UP' ? t.pm_up : t.pm_down);
-  const time = (t.time || '').replace('T', ' ').slice(5, 16);
+  const entryTime = (t.time || '').replace('T', ' ').slice(5, 16);
+  const exitTime = (t.end_time || '').replace('T', ' ').slice(11, 16);
   const btcMove = t.btc_price_end - t.btc_price_start;
   const btcMovePct = t.btc_price_start > 0 ? (btcMove / t.btc_price_start * 100) : 0;
 
@@ -104,7 +106,7 @@ function TradeCard({ trade: t, expanded, onToggle }: { trade: DetailedTrade; exp
           </span>
           <span className="text-[var(--color-accent)] text-[9px]">{t.strategy}</span>
           <span className={dir === 'UP' ? 'text-[var(--color-up)]' : 'text-[var(--color-down)]'}>{dir}</span>
-          <span className="text-[var(--color-text-dim)]">{time}</span>
+          <span className="text-[var(--color-text-dim)]">{entryTime}</span>
           <span className="text-white">${(t.bet_size || 0).toFixed(2)}</span>
           {entryP > 0.01 && <span className="text-[var(--color-text-dim)]">@{(entryP * 100).toFixed(0)}c</span>}
         </div>
@@ -120,6 +122,14 @@ function TradeCard({ trade: t, expanded, onToggle }: { trade: DetailedTrade; exp
       {/* Expanded detail */}
       {expanded && (
         <div className="px-3 py-2 bg-[var(--color-bg)] border-t border-[var(--color-border)]/30 text-[9px] mono space-y-2">
+          {/* Timing */}
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+            <Info label="Giriş Zamanı" value={entryTime || '-'} color="var(--color-accent)" />
+            <Info label="Çıkış Zamanı" value={exitTime || '-'} color="var(--color-accent)" />
+            <Info label="Süre" value="5 dk (round)" />
+            <Info label="Çıkış Tipi" value={t.exit_reason || 'held_to_expiry'} />
+          </div>
+
           {/* Round info */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <Info label="BTC Başlangıç" value={'$' + t.btc_price_start?.toFixed(2)} />
@@ -131,7 +141,7 @@ function TradeCard({ trade: t, expanded, onToggle }: { trade: DetailedTrade; exp
           {/* Trade info */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
             <Info label="Giriş Fiyatı" value={entryP > 0.01 ? (entryP * 100).toFixed(1) + 'c' : '-'} />
-            <Info label="Çıkış" value={t.exit_reason || 'held_to_expiry'} />
+            <Info label="Bahis" value={'$' + (t.bet_size || 0).toFixed(2)} />
             <Info label="EV" value={t.ev ? t.ev.toFixed(4) : '-'} color={t.ev > 0 ? 'var(--color-up)' : 'var(--color-down)'} />
             <Info label="Fee" value={t.fee_rate ? (t.fee_rate * 100).toFixed(2) + '%' : '-'} />
           </div>

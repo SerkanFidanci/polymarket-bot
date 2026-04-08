@@ -464,7 +464,8 @@ app.get('/api/trades/detailed', (_req, res) => {
   try {
     // BASELINE trades
     const baseline = db.prepare(`
-      SELECT id, round_start_time as time, 'BASELINE' as strategy,
+      SELECT id, round_start_time as time, round_end_time as end_time,
+        'BASELINE' as strategy,
         hypothetical_decision as decision, actual_result, hypothetical_pnl as pnl,
         hypothetical_bet_size as bet_size, hypothetical_ev as ev,
         polymarket_up_price as pm_up, polymarket_down_price as pm_down,
@@ -480,7 +481,8 @@ app.get('/api/trades/detailed', (_req, res) => {
 
     // Strategy trades with round data
     const strategies = db.prepare(`
-      SELECT st.id, st.created_at as time, st.strategy_name as strategy,
+      SELECT st.id, st.created_at as time, tr.round_end_time as end_time,
+        st.strategy_name as strategy,
         st.decision, st.actual_result, st.pnl, st.bet_size, 0 as ev,
         tr.polymarket_up_price as pm_up, tr.polymarket_down_price as pm_down,
         tr.final_score as score, tr.confidence as conf,
