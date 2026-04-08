@@ -100,13 +100,6 @@ const STRATEGIES: Array<{
     },
   },
   {
-    // 3. CONTRARIAN — DISABLED (market correct 98.6% at extremes, 0% win rate)
-    name: 'CONTRARIAN',
-    disabled: true,
-    shouldEnter() { return { decision: 'SKIP', betPct: 0 }; },
-    shouldExit() { return null; },
-  },
-  {
     // 4. TREND_FOLLOWER — EMA+VWAP alignment, wider trailing stop
     // CHANGED: trailing stop 15%→25%
     name: 'TREND_FOLLOWER',
