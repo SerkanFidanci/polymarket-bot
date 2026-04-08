@@ -50,9 +50,9 @@ function smartExit(pos: OpenPos, tokenPrice: number, signal: CombinedSignal | nu
   const isUp = pos.direction === 'UP';
   const sc = signal.finalScore;
 
-  // Sinyal güçlü ters yöne döndüyse → çık
-  if (isUp && sc < -15) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
-  if (!isUp && sc > 15) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+  // Sinyal güçlü ters yöne döndüyse → çık (eşik 25 — hafif dönüşlerde çıkma)
+  if (isUp && sc < -25) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+  if (!isUp && sc > 25) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
 
   // %40+ düştü VE sinyal desteklemiyor → çık
   if (tokenPrice < pos.entryPrice * 0.60) {
