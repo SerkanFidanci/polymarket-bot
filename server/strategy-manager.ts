@@ -2,6 +2,7 @@ import { db } from './db/sqlite.js';
 import { serverBinanceWS } from './binance-ws.js';
 import { serverSignalEngine } from './signal-engine.js';
 import { getBtcMomentum, getPmMomentum, detectSpike, detectOracleLag } from './momentum-tracker.js';
+import { getMarketContext } from './market-context.js';
 import type { CombinedSignal } from '../src/types/index.js';
 
 // Kötü saatler (UTC) — WR ve PnL verisi 800 round'dan
@@ -58,6 +59,14 @@ function smartExit(pos: OpenPos, tokenPrice: number, signal: CombinedSignal | nu
     const stillOk = (isUp && sc > 5) || (!isUp && sc < -5);
     if (!stillOk) return { shouldExit: true, reason: 'dropping_no_support', exitPrice: tokenPrice };
   }
+
+  // Multi-timeframe trend bizim ters yöndeyse + token düşüyorsa → çık
+  const ctx = getMarketContext();
+  if (ctx.trendsAgree && tokenPrice < pos.entryPrice * 0.80) {
+    const trendAgainst = (isUp && ctx.trendDirection === 'DOWN') || (!isUp && ctx.trendDirection === 'UP');
+    if (trendAgainst) return { shouldExit: true, reason: 'trend_against', exitPrice: tokenPrice };
+  }
+
   return null;
 }
 
@@ -201,6 +210,24 @@ const STRATEGIES: Array<{
       if (btcMom && Math.abs(btcMom.changePct) > 0.05) {
         score += btcMom.changePct > 0 ? 1 : -1;
         reasons++;
+      }
+
+      // MULTI-TIMEFRAME TREND — büyük resim
+      const mCtx = getMarketContext();
+      if (mCtx.trendsAgree) {
+        score += mCtx.trendDirection === 'UP' ? 3 : -3; // güçlü trend bonusu
+        reasons++;
+      }
+
+      // ROUND PATTERN — mean reversion
+      if (mCtx.roundPattern.meanReversionSignal !== 'NONE') {
+        score += mCtx.roundPattern.meanReversionSignal === 'UP' ? 2 : -2;
+        reasons++;
+      }
+
+      // VOLATİLİTE — düşükse güvenme
+      if (mCtx.volatility.isLowVol) {
+        return { decision: 'SKIP', betPct: 0 }; // sakin market = tahmin zor
       }
 
       if (reasons < 2 || Math.abs(score) < 3) return { decision: 'SKIP', betPct: 0 };

@@ -9,6 +9,7 @@ import { evaluateExitConditions, recordBtcPrice, type OpenPosition } from './exi
 import { EXIT_CHECK_INTERVAL } from '../src/utils/constants.js';
 import { strategyManager, setGlobalPrices } from './strategy-manager.js';
 import { recordBtcTick, recordPmTick, getAllMetrics } from './momentum-tracker.js';
+import { startMarketContext, getMarketContext } from './market-context.js';
 
 let trainingInterval: ReturnType<typeof setInterval> | null = null;
 let roundCounter = getRoundCountFromDB();
@@ -653,6 +654,9 @@ export const serverTrainingLoop = {
     // Wait a few seconds for signals to warm up
     console.log('[TrainingLoop] Waiting 15s for signal warmup...');
     await new Promise(resolve => setTimeout(resolve, 15000));
+
+    // Start market context (5m/15m trends + ATR)
+    startMarketContext();
 
     // Start polling every 10 seconds
     console.log('[TrainingLoop] Starting round polling (10s interval)');

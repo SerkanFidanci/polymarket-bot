@@ -9,6 +9,7 @@ import { serverTrainingLoop } from './training-loop.js';
 import { serverBinanceWS } from './binance-ws.js';
 import { strategyManager } from './strategy-manager.js';
 import { getAllMetrics } from './momentum-tracker.js';
+import { getMarketContext } from './market-context.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -52,6 +53,7 @@ app.get('/api/live-data', (_req, res) => {
         hasSignalSnapshot: tracking.hasSignalSnapshot,
       },
       momentum: getAllMetrics(serverBinanceWS.klines),
+      market: getMarketContext(),
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });
