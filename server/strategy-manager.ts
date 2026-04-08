@@ -1,7 +1,11 @@
 import { db } from './db/sqlite.js';
 import { serverBinanceWS } from './binance-ws.js';
 import { serverSignalEngine } from './signal-engine.js';
+import { getBtcMomentum, getPmMomentum, detectSpike, detectOracleLag } from './momentum-tracker.js';
 import type { CombinedSignal } from '../src/types/index.js';
+
+// Kötü saatler (UTC) — WR ve PnL verisi 800 round'dan
+const BAD_HOURS = new Set([2, 4, 13, 17, 20]);
 
 // ===== TYPES =====
 
@@ -39,279 +43,223 @@ interface RoundContext {
   timeIntoRound: number; // seconds since round start
 }
 
+// ===== SHARED EXIT: signal_reversed (works on all strategies) =====
+function smartExit(pos: OpenPos, tokenPrice: number, signal: CombinedSignal | null): ExitResult | null {
+  if (!signal) return null;
+  const isUp = pos.direction === 'UP';
+  const sc = signal.finalScore;
+
+  // Sinyal güçlü ters yöne döndüyse → çık
+  if (isUp && sc < -15) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+  if (!isUp && sc > 15) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+
+  // %40+ düştü VE sinyal desteklemiyor → çık
+  if (tokenPrice < pos.entryPrice * 0.60) {
+    const stillOk = (isUp && sc > 5) || (!isUp && sc < -5);
+    if (!stillOk) return { shouldExit: true, reason: 'dropping_no_support', exitPrice: tokenPrice };
+  }
+  return null;
+}
+
+// ===== SHARED: bad hour filter =====
+function isBadHour(): boolean {
+  return BAD_HOURS.has(new Date().getUTCHours());
+}
+
 // ===== STRATEGIES =====
 
 const STRATEGIES: Array<{
   name: string;
-  disabled?: boolean;
   shouldEnter: (ctx: RoundContext) => StrategyDecision;
   shouldExit: (pos: OpenPos, tokenPrice: number, timeLeftSec: number, signal: CombinedSignal | null) => ExitResult | null;
 }> = [
   {
-    // 1. AGGRESSIVE — medium threshold, stop-loss protected
-    // CHANGED: score 10→15, conf 15→20, bet 3%→2%, min entry 15c
+    // 1. AGGRESSIVE
     name: 'AGGRESSIVE',
     shouldEnter(ctx) {
+      if (isBadHour()) return { decision: 'SKIP', betPct: 0 };
       const { signal, upPrice, downPrice } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
       const absScore = Math.abs(signal.finalScore);
       if (absScore > 15 && signal.confidence > 20) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
-        // Direction-specific threshold: BUY_UP has 36% WR vs BUY_DOWN 52% WR
-        // Require stronger signal for UP to filter out weak longs
         if (dir === 'UP' && absScore <= 25) return { decision: 'SKIP', betPct: 0 };
         const price = dir === 'UP' ? upPrice : downPrice;
-        if (price < 0.30) return { decision: 'SKIP', betPct: 0 }; // data: <30c = 0% WR
+        if (price < 0.30) return { decision: 'SKIP', betPct: 0 };
         const prob = Math.min(0.85, 0.5 + absScore / 200);
         const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
         if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.02 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(pos, tokenPrice) {
-      // %50 drop from entry = cut loss (won't recover)
-      // No stop-loss — binary tokens dip mid-round then recover (9/9 half_loss exits were winners)
-      return null;
-    },
+    shouldExit(pos, tokenPrice, _tl, signal) { return smartExit(pos, tokenPrice, signal); },
   },
   {
-    // 2. SELECTIVE — high quality, hold to expiry, DOWN only
-    name: 'SELECTIVE',
-    shouldEnter(ctx) {
-      const { signal, upPrice, downPrice } = ctx;
-      if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
-      const absScore = Math.abs(signal.finalScore);
-      if (absScore > 20 && signal.confidence > 30 && signal.confidence <= 55) {
-        const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
-        // Only BUY_DOWN — UP signals consistently lose across all strategies
-        if (dir === 'UP') return { decision: 'SKIP', betPct: 0 };
-        const price = downPrice;
-        if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 }; // price floor
-        const prob = Math.min(0.85, 0.5 + absScore / 200);
-        const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
-        if (ev > 0) return { decision: 'BUY_DOWN', betPct: 0.05 };
-      }
-      return { decision: 'SKIP', betPct: 0 };
-    },
-    shouldExit(pos, tokenPrice) {
-      // No stop-loss — binary tokens dip mid-round then recover (9/9 half_loss exits were winners)
-      // Hold to expiry otherwise — abs_floor_5c stop-loss destroyed $13.62 of value:
-      // 6 of 7 triggered exits would have won at expiry. Binary tokens dip
-      // mid-round then recover; any early exit panics on temporary noise.
-      return null;
-    },
-  },
-  {
-    // 4. TREND_FOLLOWER — EMA+VWAP alignment, wider trailing stop
-    // CHANGED: trailing stop 15%→25%
+    // 2. TREND_FOLLOWER
     name: 'TREND_FOLLOWER',
     shouldEnter(ctx) {
+      if (isBadHour()) return { decision: 'SKIP', betPct: 0 };
       const { signal, upPrice, downPrice } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
       const emaMacd = signal.signals.ema_macd;
       const vwapBb = signal.signals.vwap_bb;
-      const emaAligned = emaMacd && Math.sign(emaMacd.score) === Math.sign(signal.finalScore) && Math.abs(emaMacd.score) > 15;
-      const vwapAligned = vwapBb && Math.sign(vwapBb.score) === Math.sign(signal.finalScore) && Math.abs(vwapBb.score) > 15;
-      const trendAligned = (emaAligned || vwapAligned) && signal.confidence > 25;
-      if (trendAligned) {
+      const emaOk = emaMacd && Math.sign(emaMacd.score) === Math.sign(signal.finalScore) && Math.abs(emaMacd.score) > 15;
+      const vwapOk = vwapBb && Math.sign(vwapBb.score) === Math.sign(signal.finalScore) && Math.abs(vwapBb.score) > 15;
+      if ((emaOk || vwapOk) && signal.confidence > 25) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
-        if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 }; // 30-70c only
+        if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 };
         const prob = Math.min(0.85, 0.5 + Math.abs(signal.finalScore) / 200);
         const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
         if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.04 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit() {
-      // No stop-loss — data shows half_loss killed 7/7 winning trades
-      // Binary tokens dip mid-round then recover to $1
-      return null;
-    },
+    shouldExit(pos, tokenPrice, _tl, signal) { return smartExit(pos, tokenPrice, signal); },
   },
   {
-    // 5. LATE_ENTRY — momentum trade, 15s exit (best performer)
-    // CHANGED: score 15→12, price range 30-70→25-75, entry window 210→180
+    // 3. LATE_ENTRY — son 2dk giriş
     name: 'LATE_ENTRY',
     shouldEnter(ctx) {
+      if (isBadHour()) return { decision: 'SKIP', betPct: 0 };
       const { signal, upPrice, downPrice, timeIntoRound } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
-
-      // Enter from 180s (was 210s) — more time for momentum
       if (timeIntoRound < 180) return { decision: 'SKIP', betPct: 0 };
-
-      // Wider price range: 25-75c (was 30-70c)
       const price = signal.finalScore > 0 ? upPrice : downPrice;
       if (price < 0.25 || price > 0.75) return { decision: 'SKIP', betPct: 0 };
-
       const absScore = Math.abs(signal.finalScore);
       if (absScore > 12 && signal.confidence > 15) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
-        // BUY_UP needs much higher score — UP loses -$5.60 vs DOWN +$2.80
         if (dir === 'UP' && absScore <= 25) return { decision: 'SKIP', betPct: 0 };
         return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(_pos, _tokenPrice, timeLeftSec) {
-      // %30 kayıpta kes, yoksa sonuna kadar tut
-      // No stop-loss — binary tokens dip mid-round then recover
-      return null;
-    },
+    shouldExit(pos, tokenPrice, _tl, signal) { return smartExit(pos, tokenPrice, signal); },
   },
   {
-    // 6. INSTINCT — her round girer, tüm verileri puanlar, içgüdüsel karar
-    // Grafik yorumu: trend, momentum, aşırı alım/satım, volume, whale, orderbook
-    // "Çok düştü çıkar" + "trend güçlü devam" mantığı
+    // 4. INSTINCT — her round, tüm veriler + PM momentum
     name: 'INSTINCT',
     shouldEnter(ctx) {
+      if (isBadHour()) return { decision: 'SKIP', betPct: 0 };
       const { signal, upPrice, downPrice } = ctx;
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
 
-      // Her round'da karar ver — ama akıllıca
-      let score = 0; // pozitif = UP, negatif = DOWN
-      let reasons = 0; // kaç sinyal oy verdi
-
+      let score = 0;
+      let reasons = 0;
       const sigs = signal.signals;
 
-      // === TREND (EMA crossover) ===
-      if (sigs.ema_macd) {
-        const ema = sigs.ema_macd;
-        if (Math.abs(ema.score) > 10) {
-          score += ema.score > 0 ? 2 : -2; // trend yönü
-          reasons++;
-          // MACD histogram güçlüyse ekstra puan
-          const hist = (ema.details as any)?.macdLine;
-          if (hist && Math.abs(hist as number) > 5) {
-            score += hist > 0 ? 1 : -1;
-          }
-        }
+      // Trend (EMA)
+      if (sigs.ema_macd && Math.abs(sigs.ema_macd.score) > 10) {
+        score += sigs.ema_macd.score > 0 ? 2 : -2; reasons++;
       }
-
-      // === AŞIRI ALIM/SATIM (RSI) — "çok düştü çıkar" ===
+      // RSI aşırı alım/satım
       if (sigs.rsi_stoch) {
         const rsi = (sigs.rsi_stoch.details as any)?.rsi as number;
         if (rsi !== undefined) {
-          if (rsi < 30) { score += 3; reasons++; } // oversold → bounce UP
-          else if (rsi > 70) { score -= 3; reasons++; } // overbought → drop DOWN
+          if (rsi < 30) { score += 3; reasons++; }
+          else if (rsi > 70) { score -= 3; reasons++; }
           else if (rsi < 40) { score += 1; reasons++; }
           else if (rsi > 60) { score -= 1; reasons++; }
         }
       }
-
-      // === VOLUME (güçlü hareket = devam) ===
-      if (sigs.cvd) {
-        if (Math.abs(sigs.cvd.score) > 20) {
-          score += sigs.cvd.score > 0 ? 2 : -2; // alıcı baskısı
-          reasons++;
-        }
-      }
-
-      // === WHALE (büyük oyuncular ne yapıyor) ===
-      if (sigs.whale) {
-        if (Math.abs(sigs.whale.score) > 30) {
-          score += sigs.whale.score > 0 ? 2 : -2;
-          reasons++;
-        }
-      }
-
-      // === ORDER BOOK (duvar nerede) ===
-      if (sigs.orderbook) {
-        if (Math.abs(sigs.orderbook.score) > 30) {
-          score += sigs.orderbook.score > 0 ? 1 : -1;
-          reasons++;
-        }
-      }
-
-      // === BOLLINGER BAND POZİSYONU ===
+      // CVD
+      if (sigs.cvd && Math.abs(sigs.cvd.score) > 20) { score += sigs.cvd.score > 0 ? 2 : -2; reasons++; }
+      // Whale
+      if (sigs.whale && Math.abs(sigs.whale.score) > 30) { score += sigs.whale.score > 0 ? 2 : -2; reasons++; }
+      // Orderbook
+      if (sigs.orderbook && Math.abs(sigs.orderbook.score) > 30) { score += sigs.orderbook.score > 0 ? 1 : -1; reasons++; }
+      // BB position
       if (sigs.vwap_bb) {
         const bbPos = (sigs.vwap_bb.details as any)?.bbPosition as number;
         if (bbPos !== undefined) {
-          if (bbPos < 0.1) { score += 2; reasons++; } // alt banda yakın → bounce UP
-          else if (bbPos > 0.9) { score -= 2; reasons++; } // üst banda yakın → düşüş
-        }
-        // VWAP altında = bearish, üstünde = bullish
-        const vwapDev = (sigs.vwap_bb.details as any)?.vwapDeviation as number;
-        if (vwapDev !== undefined) {
-          if (vwapDev > 2) { score += 1; } // VWAP üstünde
-          else if (vwapDev < -2) { score -= 1; } // VWAP altında
+          if (bbPos < 0.1) { score += 2; reasons++; }
+          else if (bbPos > 0.9) { score -= 2; reasons++; }
         }
       }
-
-      // === FUNDING RATE (kalabalık nerede) ===
+      // Funding contrarian
       if (sigs.funding) {
         const rate = (sigs.funding.details as any)?.fundingRate as number;
         if (rate !== undefined) {
-          // Yüksek pozitif funding = çok long açık → düşebilir
           if (rate > 0.0003) { score -= 1; reasons++; }
-          // Negatif funding = çok short açık → çıkabilir
           else if (rate < -0.0001) { score += 1; reasons++; }
         }
       }
-
-      // === L/S RATIO (herkes long'taysa → contrarian DOWN) ===
-      if (sigs.ls_ratio) {
-        const ls = (sigs.ls_ratio.details as any)?.globalLS as number;
-        if (ls !== undefined) {
-          if (ls > 1.3) { score -= 1; } // çok long → düşebilir
-          else if (ls < 0.7) { score += 1; } // çok short → çıkabilir
-        }
-      }
-
-      // === PM FİYAT BİLGİSİ (market ne diyor) ===
-      // PM 55c+ bir yöne bakıyorsa hafif güven
+      // PM direction
       if (upPrice > 0.58) score += 1;
       else if (downPrice > 0.58) score -= 1;
 
-      // === KARAR ===
-      // En az 3 sinyal oy vermeli
-      if (reasons < 2) return { decision: 'SKIP', betPct: 0 };
+      // PM MOMENTUM — yeni! PM fiyatı hızla bir yöne kayıyorsa güven artır
+      const pmMom = getPmMomentum(30);
+      if (pmMom) {
+        if (pmMom.direction === 'UP') { score += 2; reasons++; }
+        else if (pmMom.direction === 'DOWN') { score -= 2; reasons++; }
+      }
 
-      // Yön ve güç
+      // BTC MOMENTUM
+      const btcMom = getBtcMomentum(30);
+      if (btcMom && Math.abs(btcMom.changePct) > 0.05) {
+        score += btcMom.changePct > 0 ? 1 : -1;
+        reasons++;
+      }
+
+      if (reasons < 2 || Math.abs(score) < 3) return { decision: 'SKIP', betPct: 0 };
+
       const dir = score > 0 ? 'UP' : 'DOWN';
-      const strength = Math.abs(score);
-
-      // Güç bazlı bet boyutu: zayıf = %1, güçlü = %3
-      let betPct = 0.01;
-      if (strength >= 5) betPct = 0.02;
-      if (strength >= 8) betPct = 0.03;
-
-      // Fiyat kontrolü — 30-70c arası
       const price = dir === 'UP' ? upPrice : downPrice;
       if (price < 0.25 || price > 0.75) return { decision: 'SKIP', betPct: 0 };
 
-      // Çok zayıfsa girme
-      if (strength < 3) return { decision: 'SKIP', betPct: 0 };
+      let betPct = 0.01;
+      if (Math.abs(score) >= 5) betPct = 0.02;
+      if (Math.abs(score) >= 8) betPct = 0.03;
 
       return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct };
     },
-    shouldExit(pos, tokenPrice, _timeLeftSec, signal) {
-      if (!signal) return null;
+    shouldExit(pos, tokenPrice, _tl, signal) { return smartExit(pos, tokenPrice, signal); },
+  },
+  {
+    // 5. MOMENTUM_RIDER — oracle lag + spike exploiter
+    name: 'MOMENTUM_RIDER',
+    shouldEnter(ctx) {
+      if (isBadHour()) return { decision: 'SKIP', betPct: 0 };
+      const { signal, upPrice, downPrice } = ctx;
+      if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
 
-      // Sinyaller ters mi döndü? Giriş yönünün tersine güçlü sinyal varsa çık
-      const isUp = pos.direction === 'UP';
-      const liveScore = signal.finalScore;
-
-      // UP aldık ama sinyal artık güçlü DOWN gösteriyorsa → çık
-      if (isUp && liveScore < -15) {
-        return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
-      }
-      // DOWN aldık ama sinyal artık güçlü UP gösteriyorsa → çık
-      if (!isUp && liveScore > 15) {
-        return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
-      }
-
-      // Token fiyatı giriş fiyatının %40 altına düştüyse VE sinyal de aynı yönde değilse → çık
-      if (tokenPrice < pos.entryPrice * 0.60) {
-        // Sinyal hala bizim yöndeyse tut (toparlanabilir)
-        const stillOurWay = (isUp && liveScore > 5) || (!isUp && liveScore < -5);
-        if (!stillOurWay) {
-          return { shouldExit: true, reason: 'dropping_no_support', exitPrice: tokenPrice };
+      // Oracle lag: BTC hareket etti ama PM henüz yansıtmadı
+      const lag = detectOracleLag();
+      if (lag.hasLag && lag.confidence > 30) {
+        const dir = lag.btcDirection;
+        const price = dir === 'UP' ? upPrice : downPrice;
+        if (price >= 0.30 && price <= 0.65) {
+          return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
         }
       }
 
-      return null;
+      // Spike: BTC ani hareket (>%0.15 in 10s)
+      const spike = detectSpike(10);
+      if (spike.isSpike && spike.magnitude > 0.15) {
+        const dir = spike.direction;
+        const price = dir === 'UP' ? upPrice : downPrice;
+        if (price >= 0.30 && price <= 0.60) {
+          return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
+        }
+      }
+
+      // Güçlü BTC momentum (30s'de %0.1+)
+      const btcMom = getBtcMomentum(30);
+      if (btcMom && Math.abs(btcMom.changePct) > 0.10) {
+        const dir = btcMom.changePct > 0 ? 'UP' : 'DOWN';
+        const price = dir === 'UP' ? upPrice : downPrice;
+        if (price >= 0.30 && price <= 0.55) {
+          // Sinyal de aynı yönde mi? Bonus güven
+          const sigAgree = (dir === 'UP' && signal.finalScore > 5) || (dir === 'DOWN' && signal.finalScore < -5);
+          if (sigAgree) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.02 };
+        }
+      }
+
+      return { decision: 'SKIP', betPct: 0 };
     },
+    shouldExit(pos, tokenPrice, _tl, signal) { return smartExit(pos, tokenPrice, signal); },
   },
 ];
 
