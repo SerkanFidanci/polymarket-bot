@@ -152,8 +152,8 @@ const STRATEGIES: Array<{
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(_pos, _tokenPrice, timeLeftSec) {
-      if (_tokenPrice < _pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: _tokenPrice };
-      if (timeLeftSec <= 20) return { shouldExit: true, reason: 'time_20s_exit', exitPrice: _tokenPrice };
+      // %30 kayıpta kes, yoksa sonuna kadar tut
+      if (_tokenPrice < _pos.entryPrice * 0.70) return { shouldExit: true, reason: 'loss_30pct', exitPrice: _tokenPrice };
       return null;
     },
   },
