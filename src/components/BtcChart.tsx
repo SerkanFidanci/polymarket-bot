@@ -1,33 +1,22 @@
 import { useEffect, useRef, useCallback } from 'react';
 import { createChart, type IChartApi, type ISeriesApi, ColorType, CandlestickSeries, LineSeries, createSeriesMarkers } from 'lightweight-charts';
 
-interface TradeMarker {
-  time: number; // unix seconds
-  direction: 'UP' | 'DOWN';
-  strategy: string;
-  pnl: number;
-  won: boolean;
-}
-
 export function BtcChart() {
   const containerRef = useRef<HTMLDivElement>(null);
   const chartRef = useRef<IChartApi | null>(null);
   const candleRef = useRef<ISeriesApi<'Candlestick'> | null>(null);
-  const markersRef = useRef<ReturnType<typeof createSeriesMarkers> | null>(null);
+  const markersPluginRef = useRef<ReturnType<typeof createSeriesMarkers> | null>(null);
 
   const loadMarkers = useCallback(async (candles: ISeriesApi<'Candlestick'>) => {
     try {
-      // Fetch all strategy trades + baseline trades
-      const [blRes, ...stratRes] = await Promise.all([
+      // Only BASELINE + LATE_ENTRY (top performers, less clutter)
+      const [blRes, lateRes] = await Promise.all([
         fetch('/api/training-rounds/trades'),
-        ...['AGGRESSIVE', 'SELECTIVE', 'TREND_FOLLOWER', 'LATE_ENTRY'].map(s =>
-          fetch(`/api/strategies/${s}/trades`)
-        ),
+        fetch('/api/strategies/LATE_ENTRY/trades'),
       ]);
 
-      const markers: TradeMarker[] = [];
+      const markers: Array<{ time: number; up: boolean; won: boolean; label: string }> = [];
 
-      // Baseline trades
       if (blRes.ok) {
         const trades = await blRes.json() as Array<{
           round_start_time: string; hypothetical_decision: string;
@@ -35,52 +24,50 @@ export function BtcChart() {
         }>;
         trades.forEach(t => {
           const dir = t.hypothetical_decision === 'BUY_UP' ? 'UP' : 'DOWN';
+          const won = dir === t.actual_result;
           markers.push({
             time: Math.floor(new Date(t.round_start_time).getTime() / 1000),
-            direction: dir as 'UP' | 'DOWN',
-            strategy: 'BASE',
-            pnl: t.hypothetical_pnl || 0,
-            won: dir === t.actual_result,
+            up: dir === 'UP',
+            won,
+            label: won ? '+' : '-',
           });
         });
       }
 
-      // Strategy trades
-      const stratNames = ['AGGRESSIVE', 'SELECTIVE', 'TREND_FOLLOWER', 'LATE_ENTRY'];
-      for (let i = 0; i < stratRes.length; i++) {
-        if (!stratRes[i]!.ok) continue;
-        const trades = await stratRes[i]!.json() as Array<{
-          created_at: string; decision: string;
-          actual_result: string; pnl: number; strategy_name: string;
+      if (lateRes.ok) {
+        const trades = await lateRes.json() as Array<{
+          created_at: string; decision: string; pnl: number;
         }>;
         trades.forEach(t => {
           const dir = t.decision === 'BUY_UP' ? 'UP' : 'DOWN';
           markers.push({
             time: Math.floor(new Date(t.created_at + 'Z').getTime() / 1000),
-            direction: dir as 'UP' | 'DOWN',
-            strategy: stratNames[i]!.slice(0, 4),
-            pnl: t.pnl || 0,
+            up: dir === 'UP',
             won: t.pnl >= 0,
+            label: t.pnl >= 0 ? '+' : '-',
           });
         });
       }
 
       if (markers.length === 0) return;
 
-      // Convert to lightweight-charts markers
       const chartMarkers = markers
         .sort((a, b) => a.time - b.time)
         .map(m => ({
           time: m.time as unknown as import('lightweight-charts').UTCTimestamp,
-          position: m.direction === 'UP' ? 'belowBar' as const : 'aboveBar' as const,
+          position: m.up ? 'belowBar' as const : 'aboveBar' as const,
           color: m.won ? '#22c55e' : '#ef4444',
-          shape: m.direction === 'UP' ? 'arrowUp' as const : 'arrowDown' as const,
-          text: `${m.strategy} ${m.pnl >= 0 ? '+' : ''}$${m.pnl.toFixed(1)}`,
+          shape: m.up ? 'arrowUp' as const : 'arrowDown' as const,
+          text: m.label,
+          size: 1,
         }));
 
       /* eslint-disable @typescript-eslint/no-explicit-any */
-      if (markersRef.current) { (markersRef.current as any).setMarkers(chartMarkers); }
-      else { markersRef.current = (createSeriesMarkers as any)(candles, chartMarkers); }
+      if (markersPluginRef.current) {
+        (markersPluginRef.current as any).setMarkers(chartMarkers);
+      } else {
+        markersPluginRef.current = (createSeriesMarkers as any)(candles, chartMarkers);
+      }
       /* eslint-enable @typescript-eslint/no-explicit-any */
     } catch { /* silent */ }
   }, []);
@@ -109,7 +96,6 @@ export function BtcChart() {
     const ema5 = chart.addSeries(LineSeries, { color: '#f59e0b', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
     const ema13 = chart.addSeries(LineSeries, { color: '#8b5cf6', lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
 
-    // Fetch initial klines
     fetch('https://api.binance.com/api/v3/klines?symbol=BTCUSDT&interval=1m&limit=120')
       .then(r => r.json())
       .then((data: (string | number)[][]) => {
@@ -121,21 +107,16 @@ export function BtcChart() {
           close: parseFloat(k[4] as string),
         }));
         candles.setData(bars);
-
         const closes = bars.map(b => b.close);
         ema5.setData(computeEMA(closes, 5).map((v, i) => ({ time: bars[i]!.time, value: v })));
         ema13.setData(computeEMA(closes, 13).map((v, i) => ({ time: bars[i]!.time, value: v })));
         chart.timeScale().fitContent();
-
-        // Load trade markers
         loadMarkers(candles);
       })
       .catch(() => {});
 
-    // Refresh markers every 30s
     const markerInterval = setInterval(() => { if (candleRef.current) loadMarkers(candleRef.current); }, 30000);
 
-    // Live updates via WS
     const ws = new WebSocket('wss://stream.binance.com:9443/ws/btcusdt@kline_1m');
     ws.onmessage = (event) => {
       try {
@@ -144,17 +125,14 @@ export function BtcChart() {
         if (!k) return;
         candles.update({
           time: (k.t / 1000) as unknown as import('lightweight-charts').UTCTimestamp,
-          open: parseFloat(k.o),
-          high: parseFloat(k.h),
-          low: parseFloat(k.l),
-          close: parseFloat(k.c),
+          open: parseFloat(k.o), high: parseFloat(k.h),
+          low: parseFloat(k.l), close: parseFloat(k.c),
         });
       } catch {}
     };
 
     const onResize = () => { chart.applyOptions({ width: containerRef.current?.clientWidth ?? 600 }); };
     window.addEventListener('resize', onResize);
-
     return () => { ws.close(); chart.remove(); clearInterval(markerInterval); window.removeEventListener('resize', onResize); };
   }, [loadMarkers]);
 
@@ -165,8 +143,8 @@ export function BtcChart() {
         <span className="flex gap-3">
           <span style={{ color: '#f59e0b' }}>EMA5</span>
           <span style={{ color: '#8b5cf6' }}>EMA13</span>
-          <span className="text-[#22c55e]">▲ WIN</span>
-          <span className="text-[#ef4444]">▼ LOSS</span>
+          <span className="text-[#22c55e]">▲ Win</span>
+          <span className="text-[#ef4444]">▼ Loss</span>
         </span>
       </div>
       <div ref={containerRef} />
