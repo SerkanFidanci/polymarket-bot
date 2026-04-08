@@ -16,7 +16,7 @@ export function BtcChart() {
       ]);
 
       const markers: Array<{ time: number; up: boolean; won: boolean }> = [];
-      const cutoff = Date.now() - 2 * 60 * 60 * 1000; // only last 2 hours
+      const cutoff = Date.now() - 6 * 60 * 60 * 1000; // last 6 hours
 
       if (blRes.ok) {
         const trades = await blRes.json() as Array<{
@@ -61,8 +61,8 @@ export function BtcChart() {
           position: m.up ? 'belowBar' as const : 'aboveBar' as const,
           color: m.won ? '#22c55e' : '#ef4444',
           shape: m.up ? 'arrowUp' as const : 'arrowDown' as const,
-          text: '',
-          size: 0,
+          text: m.won ? '$' : 'x',
+          size: 1,
         }));
 
       /* eslint-disable @typescript-eslint/no-explicit-any */
