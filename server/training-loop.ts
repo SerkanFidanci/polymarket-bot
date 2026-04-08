@@ -90,6 +90,46 @@ async function runAccuracyCheck() {
   logAccuracyToDB(accuracies);
 
   console.log(`[TrainingLoop] Accuracy check (${rounds.length} rounds): ${accuracies.map(a => `${a.signalName}:${(a.accuracy * 100).toFixed(1)}%`).join(', ')}`);
+
+  // Auto-rebalance weights based on accuracy
+  // <48% = harmful (0.01), 48-53% = neutral (0.03), >53% = good (accuracy value)
+  const newWeights: Record<string, number> = {};
+  let sum = 0;
+  for (const acc of accuracies) {
+    const name = acc.signalName;
+    if (name === 'liquidation') { newWeights[name] = 0; continue; }
+    if (acc.totalPredictions < 10) { newWeights[name] = currentWeights[name]; sum += currentWeights[name]; continue; }
+
+    let w: number;
+    if (acc.accuracy < 0.48) w = 0.01;
+    else if (acc.accuracy < 0.53) w = 0.03;
+    else w = acc.accuracy;
+    newWeights[name] = w;
+    sum += w;
+  }
+
+  // Normalize to 1.0
+  for (const k of Object.keys(newWeights)) {
+    if (k !== 'liquidation' && sum > 0) newWeights[k] /= sum;
+  }
+  newWeights['liquidation'] = 0;
+
+  // Check if weights actually changed significantly
+  let maxDiff = 0;
+  for (const k of Object.keys(newWeights)) {
+    maxDiff = Math.max(maxDiff, Math.abs((newWeights[k] ?? 0) - (currentWeights[k] ?? 0)));
+  }
+
+  if (maxDiff > 0.02) { // only apply if >2% change
+    serverSignalEngine.setWeights(newWeights as any);
+    logOptimizationToDB(
+      'accuracy_auto', rounds.length,
+      JSON.stringify(currentWeights), JSON.stringify(newWeights),
+      0, 0, 0, true,
+      `Auto-rebalance: ${accuracies.filter(a => a.accuracy < 0.48 && a.totalPredictions >= 10).map(a => a.signalName + ' ' + (a.accuracy*100).toFixed(0) + '%').join(', ')} penalized`
+    );
+    console.log(`[TrainingLoop] Weights auto-updated. Top: ${Object.entries(newWeights).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([k,v])=>k+':'+(v*100).toFixed(0)+'%').join(', ')}`);
+  }
 }
 
 async function runFullOptimization() {
