@@ -67,9 +67,9 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit() {
-      // Hold to expiry — data shows exit manager destroys value on binary markets
-      // Tokens dip mid-round then recover; stop-loss panics on temporary noise
+    shouldExit(pos, tokenPrice) {
+      // %50 drop from entry = cut loss (won't recover)
+      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
       return null;
     },
   },
@@ -92,8 +92,9 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit() {
-      // Hold to expiry — abs_floor_5c stop-loss destroyed $13.62 of value:
+    shouldExit(pos, tokenPrice) {
+      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
+      // Hold to expiry otherwise — abs_floor_5c stop-loss destroyed $13.62 of value:
       // 6 of 7 triggered exits would have won at expiry. Binary tokens dip
       // mid-round then recover; any early exit panics on temporary noise.
       return null;
@@ -121,8 +122,8 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit() {
-      // Hold to expiry — trailing stops destroy value on binary markets
+    shouldExit(pos, tokenPrice) {
+      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
       return null;
     },
   },
@@ -151,6 +152,7 @@ const STRATEGIES: Array<{
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(_pos, _tokenPrice, timeLeftSec) {
+      if (_tokenPrice < _pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: _tokenPrice };
       if (timeLeftSec <= 20) return { shouldExit: true, reason: 'time_20s_exit', exitPrice: _tokenPrice };
       return null;
     },
@@ -184,8 +186,9 @@ const STRATEGIES: Array<{
 
       return { decision: pmDir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.04 };
     },
-    shouldExit() {
-      // Hold to expiry — 86% WR, don't cut winners
+    shouldExit(pos, tokenPrice) {
+      // %50 drop = cut loss
+      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
       return null;
     },
   },
