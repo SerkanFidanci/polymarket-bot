@@ -15,22 +15,19 @@ export function BtcChart() {
         fetch('/api/strategies/LATE_ENTRY/trades'),
       ]);
 
-      const markers: Array<{ time: number; up: boolean; won: boolean; label: string }> = [];
+      const markers: Array<{ time: number; up: boolean; won: boolean }> = [];
+      const cutoff = Date.now() - 2 * 60 * 60 * 1000; // only last 2 hours
 
       if (blRes.ok) {
         const trades = await blRes.json() as Array<{
           round_start_time: string; hypothetical_decision: string;
-          actual_result: string; hypothetical_pnl: number;
+          actual_result: string;
         }>;
         trades.forEach(t => {
+          const ts = new Date(t.round_start_time).getTime();
+          if (ts < cutoff) return;
           const dir = t.hypothetical_decision === 'BUY_UP' ? 'UP' : 'DOWN';
-          const won = dir === t.actual_result;
-          markers.push({
-            time: Math.floor(new Date(t.round_start_time).getTime() / 1000),
-            up: dir === 'UP',
-            won,
-            label: won ? '+' : '-',
-          });
+          markers.push({ time: Math.floor(ts / 1000), up: dir === 'UP', won: dir === t.actual_result });
         });
       }
 
@@ -39,27 +36,33 @@ export function BtcChart() {
           created_at: string; decision: string; pnl: number;
         }>;
         trades.forEach(t => {
+          const ts = new Date(t.created_at + 'Z').getTime();
+          if (ts < cutoff) return;
           const dir = t.decision === 'BUY_UP' ? 'UP' : 'DOWN';
-          markers.push({
-            time: Math.floor(new Date(t.created_at + 'Z').getTime() / 1000),
-            up: dir === 'UP',
-            won: t.pnl >= 0,
-            label: t.pnl >= 0 ? '+' : '-',
-          });
+          markers.push({ time: Math.floor(ts / 1000), up: dir === 'UP', won: t.pnl >= 0 });
         });
       }
 
-      if (markers.length === 0) return;
+      // Deduplicate — only 1 marker per minute
+      const seen = new Set<number>();
+      const deduped = markers.filter(m => {
+        const key = Math.floor(m.time / 60) * 60;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+      });
 
-      const chartMarkers = markers
+      if (deduped.length === 0) return;
+
+      const chartMarkers = deduped
         .sort((a, b) => a.time - b.time)
         .map(m => ({
           time: m.time as unknown as import('lightweight-charts').UTCTimestamp,
           position: m.up ? 'belowBar' as const : 'aboveBar' as const,
           color: m.won ? '#22c55e' : '#ef4444',
           shape: m.up ? 'arrowUp' as const : 'arrowDown' as const,
-          text: m.label,
-          size: 1,
+          text: '',
+          size: 0,
         }));
 
       /* eslint-disable @typescript-eslint/no-explicit-any */
