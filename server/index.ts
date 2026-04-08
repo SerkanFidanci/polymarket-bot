@@ -10,6 +10,7 @@ import { serverBinanceWS } from './binance-ws.js';
 import { strategyManager } from './strategy-manager.js';
 import { getAllMetrics } from './momentum-tracker.js';
 import { getMarketContext } from './market-context.js';
+import { getTickStats } from './tick-collector.js';
 
 const app = express();
 const PORT = process.env.PORT ?? 3001;
@@ -54,6 +55,7 @@ app.get('/api/live-data', (_req, res) => {
       },
       momentum: getAllMetrics(serverBinanceWS.klines),
       market: getMarketContext(),
+      ticks: getTickStats(),
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });

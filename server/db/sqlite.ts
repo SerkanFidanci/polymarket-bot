@@ -219,6 +219,39 @@ export function initDatabase(): void {
   `);
 
   // Migrations — add columns if missing
+  // Tick-by-tick data collection for signal analysis
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS round_ticks (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      round_slug TEXT NOT NULL,
+      timestamp TEXT NOT NULL,
+      seconds_into_round INTEGER,
+      btc_price REAL,
+      pm_up REAL,
+      pm_down REAL,
+      combined_score REAL,
+      confidence REAL,
+      sig_orderbook REAL,
+      sig_ema_macd REAL,
+      sig_rsi_stoch REAL,
+      sig_vwap_bb REAL,
+      sig_cvd REAL,
+      sig_whale REAL,
+      sig_funding REAL,
+      sig_oi REAL,
+      sig_ls_ratio REAL,
+      btc_momentum_10s REAL,
+      btc_momentum_30s REAL,
+      pm_momentum_30s REAL,
+      trend_5m TEXT,
+      trend_15m TEXT,
+      atr REAL
+    )
+  `);
+
+  // Index for fast queries per round
+  try { db.exec(`CREATE INDEX IF NOT EXISTS idx_round_ticks_slug ON round_ticks(round_slug)`); } catch { /* exists */ }
+
   try { db.exec(`ALTER TABLE training_rounds ADD COLUMN polymarket_fee_rate REAL`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE strategy_trades ADD COLUMN entry_time TEXT`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE strategy_trades ADD COLUMN exit_time TEXT`); } catch { /* exists */ }

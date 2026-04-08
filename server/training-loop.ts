@@ -10,6 +10,7 @@ import { EXIT_CHECK_INTERVAL } from '../src/utils/constants.js';
 import { strategyManager, setGlobalPrices } from './strategy-manager.js';
 import { recordBtcTick, recordPmTick, getAllMetrics } from './momentum-tracker.js';
 import { startMarketContext, getMarketContext } from './market-context.js';
+import { startTickCollector, setCurrentRound as setTickRound, setTickPrices } from './tick-collector.js';
 
 let trainingInterval: ReturnType<typeof setInterval> | null = null;
 let roundCounter = getRoundCountFromDB();
@@ -495,17 +496,19 @@ async function pollRound(): Promise<void> {
       if (roundLateBy > 120) {
         console.log(`[TrainingLoop] Skipping round ${round.slug} — joined ${roundLateBy.toFixed(0)}s late (>120s threshold)`);
         currentSlug = round.slug;
-        currentTokenIdUp = round.tokenIdUp;   // still need for price refresh
+        currentTokenIdUp = round.tokenIdUp;
         currentTokenIdDown = round.tokenIdDown;
         roundUpPrice = round.priceUp;
         roundDownPrice = round.priceDown;
         startSignalSnapshot = null;
+        setTickRound(round.slug, round.startTime);
         return;
       }
 
       currentSlug = round.slug;
       currentTokenIdUp = round.tokenIdUp;
       currentTokenIdDown = round.tokenIdDown;
+      setTickRound(round.slug, round.startTime);
       roundStartPrice = serverBinanceWS.lastTradePrice;
       roundUpPrice = round.priceUp;
       roundDownPrice = round.priceDown;
@@ -658,6 +661,9 @@ export const serverTrainingLoop = {
     // Start market context (5m/15m trends + ATR)
     startMarketContext();
 
+    // Start tick collector (5s interval, signal analysis data)
+    startTickCollector();
+
     // Start polling every 10 seconds
     console.log('[TrainingLoop] Starting round polling (10s interval)');
     pollRound();
@@ -679,6 +685,7 @@ export const serverTrainingLoop = {
             setGlobalPrices(roundUpPrice, roundDownPrice);
             // Record PM tick for momentum tracking
             recordPmTick(roundUpPrice);
+            setTickPrices(roundUpPrice, roundDownPrice);
           }
         } catch { /* silent */ }
       }
