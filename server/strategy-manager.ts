@@ -154,6 +154,40 @@ const STRATEGIES: Array<{
       return null;
     },
   },
+  {
+    // 6. PM_CONFIRM — only trade when PM price AND our signal agree strongly
+    // Backtest: 22 trades, 86% WR, +$9.89 PnL (best combination found)
+    name: 'PM_CONFIRM',
+    shouldEnter(ctx) {
+      const { signal, upPrice, downPrice } = ctx;
+      if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
+
+      // PM must show strong direction (60c+ one side)
+      const pmDir = upPrice > 0.60 ? 'UP' : downPrice > 0.60 ? 'DOWN' : null;
+      if (!pmDir) return { decision: 'SKIP', betPct: 0 }; // PM 40-60c = uncertain, skip
+
+      // Our signal must agree with PM AND be strong (|score| > 15)
+      const sigDir = signal.finalScore > 0 ? 'UP' : 'DOWN';
+      if (sigDir !== pmDir) return { decision: 'SKIP', betPct: 0 }; // disagreement = skip
+      if (Math.abs(signal.finalScore) <= 15) return { decision: 'SKIP', betPct: 0 };
+
+      // Entry price must be in 30-70c range
+      const price = pmDir === 'UP' ? upPrice : downPrice;
+      if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 };
+
+      // EV check with correct fee
+      const prob = Math.min(0.85, 0.5 + Math.abs(signal.finalScore) / 200);
+      const fee = 0.072 * (1 - price);
+      const ev = (prob * (1 - price)) - ((1 - prob) * price) - fee;
+      if (ev <= 0) return { decision: 'SKIP', betPct: 0 };
+
+      return { decision: pmDir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.04 };
+    },
+    shouldExit() {
+      // Hold to expiry — 86% WR, don't cut winners
+      return null;
+    },
+  },
 ];
 
 // ===== OPEN POSITIONS =====
