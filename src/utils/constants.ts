@@ -55,7 +55,7 @@ export const EDGE_OPTIMIZE_EVERY_N_ROUNDS = 200;
 export const FULL_OPTIMIZE_EVERY_N_ROUNDS = 500;
 
 // ===== EXIT STRATEGY =====
-export const EXIT_CHECK_INTERVAL = 1000;          // Check exits every 1s
+export const EXIT_CHECK_INTERVAL = 500;           // Check exits every 500ms
 export const STOP_LOSS_PCT = 0.50;                 // Exit if token drops to 50% of entry
 export const TAKE_PROFIT_PCT = 1.80;               // Exit if token rises to 180% of entry
 export const ABSOLUTE_STOP = 0.15;                 // Exit if token < 15¢ (recovery impossible)

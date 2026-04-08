@@ -615,7 +615,7 @@ export const serverTrainingLoop = {
     // Round detection every 10s (Gamma API), price refresh every 2s (CLOB)
     trainingInterval = setInterval(pollRound, 10000);
 
-    // CLOB price refresh — every 1 second (single source of truth for entire system)
+    // CLOB price refresh — every 500ms (single source of truth for entire system)
     setInterval(async () => {
       if (currentTokenIdUp && currentTokenIdDown) {
         try {
@@ -627,7 +627,7 @@ export const serverTrainingLoop = {
           }
         } catch { /* silent */ }
       }
-    }, 1000);
+    }, 500);
 
     // Start exit monitoring (checks every 5s)
     startExitMonitoring();
