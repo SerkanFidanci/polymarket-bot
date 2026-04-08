@@ -620,7 +620,22 @@ export const serverTrainingLoop = {
     // Start polling every 10 seconds
     console.log('[TrainingLoop] Starting round polling (10s interval)');
     pollRound();
-    trainingInterval = setInterval(pollRound, 5000);
+    // Round detection every 10s (Gamma API), price refresh every 2s (CLOB)
+    trainingInterval = setInterval(pollRound, 10000);
+
+    // Fast CLOB price refresh — 2s interval, only updates prices (not round detection)
+    setInterval(async () => {
+      if (currentTokenIdUp && currentTokenIdDown) {
+        try {
+          const prices = await refreshPrices(currentTokenIdUp, currentTokenIdDown, currentSlug);
+          if (prices) {
+            roundUpPrice = prices.priceUp;
+            roundDownPrice = prices.priceDown;
+            setGlobalPrices(roundUpPrice, roundDownPrice);
+          }
+        } catch { /* silent */ }
+      }
+    }, 2000);
 
     // Start exit monitoring (checks every 5s)
     startExitMonitoring();
