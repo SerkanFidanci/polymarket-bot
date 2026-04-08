@@ -35,6 +35,8 @@ export interface PMRound {
   active: boolean;
   closed: boolean;
   acceptingOrders: boolean;
+  tokenIdUp: string;
+  tokenIdDown: string;
   found?: boolean;
 }
 

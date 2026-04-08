@@ -3,7 +3,10 @@ import type { PMRound, LiveData } from '../hooks/useApiData';
 
 export function PolymarketPanel({ round, live }: { round: PMRound | null; live: LiveData | null }) {
   const [timeLeft, setTimeLeft] = useState(0);
+  const [liveUp, setLiveUp] = useState(0);
+  const [liveDown, setLiveDown] = useState(0);
 
+  // Timer
   useEffect(() => {
     const tick = () => {
       if (round?.endTime) setTimeLeft(Math.max(0, Math.floor((round.endTime - Date.now()) / 1000)));
@@ -12,6 +15,33 @@ export function PolymarketPanel({ round, live }: { round: PMRound | null; live: 
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [round?.endTime]);
+
+  // Direct CLOB price polling — every 3 seconds for real-time prices
+  useEffect(() => {
+    if (!round) return;
+    const upId = round.tokenIdUp;
+    const dnId = round.tokenIdDown;
+    if (!upId || !dnId) return;
+
+    const fetchPrices = async () => {
+      try {
+        const res = await fetch(`/api/polymarket/prices?up=${encodeURIComponent(upId)}&down=${encodeURIComponent(dnId)}`);
+        if (res.ok) {
+          const data = await res.json() as { priceUp: number; priceDown: number };
+          if (data.priceUp > 0 && data.priceUp < 1) setLiveUp(data.priceUp);
+          if (data.priceDown > 0 && data.priceDown < 1) setLiveDown(data.priceDown);
+        }
+      } catch { /* silent */ }
+    };
+
+    fetchPrices();
+    const id = setInterval(fetchPrices, 3000);
+    return () => clearInterval(id);
+  }, [round?.slug]);
+
+  // Use live CLOB prices, fallback to training loop prices, then Gamma
+  const upPrice = liveUp || live?.training.roundUpPrice || round?.priceUp || 0;
+  const downPrice = liveDown || live?.training.roundDownPrice || round?.priceDown || 0;
 
   const min = Math.floor(timeLeft / 60);
   const sec = timeLeft % 60;
@@ -29,8 +59,8 @@ export function PolymarketPanel({ round, live }: { round: PMRound | null; live: 
       ) : (
         <>
           <div className="grid grid-cols-2 gap-3">
-            <PriceBox label="UP" price={live?.training.roundUpPrice || round.priceUp} color="var(--color-up)" />
-            <PriceBox label="DOWN" price={live?.training.roundDownPrice || round.priceDown} color="var(--color-down)" />
+            <PriceBox label="UP" price={upPrice} color="var(--color-up)" />
+            <PriceBox label="DOWN" price={downPrice} color="var(--color-down)" />
           </div>
 
           <div>
@@ -49,8 +79,8 @@ export function PolymarketPanel({ round, live }: { round: PMRound | null; live: 
           </div>
 
           <div className="flex justify-between text-[10px] text-[var(--color-text-dim)] mono">
-            <span>Fee: {((live?.training.feeRate ?? 0) * 100).toFixed(1)}%</span>
-            <span>Spread: {((live?.training.spread ?? 0) * 100).toFixed(1)}c</span>
+            <span>Fee: {(0.072 * upPrice * (1 - upPrice) * 100).toFixed(1)}%</span>
+            <span>Spread: {(Math.abs((upPrice + downPrice) - 1) * 100).toFixed(1)}c</span>
           </div>
         </>
       )}
