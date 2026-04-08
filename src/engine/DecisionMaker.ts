@@ -124,8 +124,8 @@ export function makeDecision(ctx: DecisionContext): Decision {
   const price = direction === 'UP' ? priceUp : priceDown;
 
   // Entry price floor: data shows <30c = 0% WR, >70c = thin edge
-  if (price < 0.30 || price > 0.70) {
-    return skip(`Price out of range (${(price * 100).toFixed(0)}¢, need 30-70¢)`, now);
+  if (price < 0.30 || price > 0.52) {
+    return skip(`Price out of range (${(price * 100).toFixed(0)}¢, need 30-52¢)`, now);
   }
   const ourProbability = clamp(0.5 + (Math.abs(signal.finalScore) / 200), 0.51, 0.85);
 
