@@ -134,7 +134,7 @@ export function useApiData() {
 
   useEffect(() => {
     refresh(); // full refresh on mount
-    const fastId = setInterval(refreshPrices, 2000); // prices every 2s
+    const fastId = setInterval(refreshPrices, 1000); // prices every 1s
     const slowId = setInterval(refresh, 10000); // full data every 10s
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
     return () => { clearInterval(fastId); clearInterval(slowId); };
