@@ -533,17 +533,9 @@ async function pollRound(): Promise<void> {
 
       console.log(`[TrainingLoop] Tracking: ${round.title} | Up:${(roundUpPrice * 100).toFixed(1)}¢ Down:${(roundDownPrice * 100).toFixed(1)}¢ | Fee:${(roundFeeRate * 100).toFixed(1)}% Spread:${(roundSpread * 100).toFixed(1)}¢ | Late:${roundLateBy.toFixed(0)}s`);
     } else {
-      // Same round — update prices from CLOB midpoint
-      if (round.tokenIdUp && round.tokenIdDown) {
-        const prices = await refreshPrices(round.tokenIdUp, round.tokenIdDown, round.slug);
-        if (prices) {
-          roundUpPrice = prices.priceUp;
-          roundDownPrice = prices.priceDown;
-          setGlobalPrices(roundUpPrice, roundDownPrice);
-        }
-      }
+      // Same round — prices already updated by fast 2s interval (no duplicate CLOB call)
 
-      // Late entry strategies: evaluate during round (after 210s)
+      // Late entry strategies: evaluate during round (after 180s)
       const timeIntoRound = (Date.now() - round.startTime) / 1000;
       if (timeIntoRound >= 180 && timeIntoRound <= 290 && roundUpPrice > 0.01 && roundDownPrice > 0.01) {
         const signal = serverSignalEngine.getLastSignal();

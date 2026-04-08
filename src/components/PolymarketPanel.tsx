@@ -16,28 +16,14 @@ export function PolymarketPanel({ round, live }: { round: PMRound | null; live: 
     return () => clearInterval(id);
   }, [round?.endTime]);
 
-  // Direct CLOB price polling — every 3 seconds for real-time prices
+  // Read prices from backend's /api/live-data (already polled by useApiData every 5s)
+  // Backend refreshes CLOB prices every 2s — no need for frontend to call CLOB directly
   useEffect(() => {
-    if (!round) return;
-    const upId = round.tokenIdUp;
-    const dnId = round.tokenIdDown;
-    if (!upId || !dnId) return;
-
-    const fetchPrices = async () => {
-      try {
-        const res = await fetch(`/api/polymarket/prices?up=${encodeURIComponent(upId)}&down=${encodeURIComponent(dnId)}`);
-        if (res.ok) {
-          const data = await res.json() as { priceUp: number; priceDown: number };
-          if (data.priceUp > 0 && data.priceUp < 1) setLiveUp(data.priceUp);
-          if (data.priceDown > 0 && data.priceDown < 1) setLiveDown(data.priceDown);
-        }
-      } catch { /* silent */ }
-    };
-
-    fetchPrices();
-    const id = setInterval(fetchPrices, 2000);
-    return () => clearInterval(id);
-  }, [round?.slug]);
+    const up = live?.training.roundUpPrice;
+    const dn = live?.training.roundDownPrice;
+    if (up && up > 0 && up < 1) setLiveUp(up);
+    if (dn && dn > 0 && dn < 1) setLiveDown(dn);
+  }, [live?.training.roundUpPrice, live?.training.roundDownPrice]);
 
   // Use live CLOB prices, fallback to training loop prices, then Gamma
   const upPrice = liveUp || live?.training.roundUpPrice || round?.priceUp || 0;

@@ -126,12 +126,19 @@ export function useApiData() {
     }
   }, []);
 
+  // Fast poll: live-data only (prices) every 2s
+  const refreshPrices = useCallback(async () => {
+    const liveData = await fetchJson<LiveData>('/api/live-data');
+    if (liveData) setLive(liveData);
+  }, []);
+
   useEffect(() => {
-    refresh();
-    const id = setInterval(refresh, 5000);
+    refresh(); // full refresh on mount
+    const fastId = setInterval(refreshPrices, 2000); // prices every 2s
+    const slowId = setInterval(refresh, 10000); // full data every 10s
     document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refresh(); });
-    return () => clearInterval(id);
-  }, [refresh]);
+    return () => { clearInterval(fastId); clearInterval(slowId); };
+  }, [refresh, refreshPrices]);
 
   return { live, round, strategies, baselineTrades, allStratTrades, fetchStratTrades, refresh };
 }
