@@ -158,6 +158,137 @@ const STRATEGIES: Array<{
       return null;
     },
   },
+  {
+    // 6. INSTINCT — her round girer, tüm verileri puanlar, içgüdüsel karar
+    // Grafik yorumu: trend, momentum, aşırı alım/satım, volume, whale, orderbook
+    // "Çok düştü çıkar" + "trend güçlü devam" mantığı
+    name: 'INSTINCT',
+    shouldEnter(ctx) {
+      const { signal, upPrice, downPrice } = ctx;
+      if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
+
+      // Her round'da karar ver — ama akıllıca
+      let score = 0; // pozitif = UP, negatif = DOWN
+      let reasons = 0; // kaç sinyal oy verdi
+
+      const sigs = signal.signals;
+
+      // === TREND (EMA crossover) ===
+      if (sigs.ema_macd) {
+        const ema = sigs.ema_macd;
+        if (Math.abs(ema.score) > 10) {
+          score += ema.score > 0 ? 2 : -2; // trend yönü
+          reasons++;
+          // MACD histogram güçlüyse ekstra puan
+          const hist = (ema.details as any)?.macdLine;
+          if (hist && Math.abs(hist as number) > 5) {
+            score += hist > 0 ? 1 : -1;
+          }
+        }
+      }
+
+      // === AŞIRI ALIM/SATIM (RSI) — "çok düştü çıkar" ===
+      if (sigs.rsi_stoch) {
+        const rsi = (sigs.rsi_stoch.details as any)?.rsi as number;
+        if (rsi !== undefined) {
+          if (rsi < 30) { score += 3; reasons++; } // oversold → bounce UP
+          else if (rsi > 70) { score -= 3; reasons++; } // overbought → drop DOWN
+          else if (rsi < 40) { score += 1; reasons++; }
+          else if (rsi > 60) { score -= 1; reasons++; }
+        }
+      }
+
+      // === VOLUME (güçlü hareket = devam) ===
+      if (sigs.cvd) {
+        if (Math.abs(sigs.cvd.score) > 20) {
+          score += sigs.cvd.score > 0 ? 2 : -2; // alıcı baskısı
+          reasons++;
+        }
+      }
+
+      // === WHALE (büyük oyuncular ne yapıyor) ===
+      if (sigs.whale) {
+        if (Math.abs(sigs.whale.score) > 30) {
+          score += sigs.whale.score > 0 ? 2 : -2;
+          reasons++;
+        }
+      }
+
+      // === ORDER BOOK (duvar nerede) ===
+      if (sigs.orderbook) {
+        if (Math.abs(sigs.orderbook.score) > 30) {
+          score += sigs.orderbook.score > 0 ? 1 : -1;
+          reasons++;
+        }
+      }
+
+      // === BOLLINGER BAND POZİSYONU ===
+      if (sigs.vwap_bb) {
+        const bbPos = (sigs.vwap_bb.details as any)?.bbPosition as number;
+        if (bbPos !== undefined) {
+          if (bbPos < 0.1) { score += 2; reasons++; } // alt banda yakın → bounce UP
+          else if (bbPos > 0.9) { score -= 2; reasons++; } // üst banda yakın → düşüş
+        }
+        // VWAP altında = bearish, üstünde = bullish
+        const vwapDev = (sigs.vwap_bb.details as any)?.vwapDeviation as number;
+        if (vwapDev !== undefined) {
+          if (vwapDev > 2) { score += 1; } // VWAP üstünde
+          else if (vwapDev < -2) { score -= 1; } // VWAP altında
+        }
+      }
+
+      // === FUNDING RATE (kalabalık nerede) ===
+      if (sigs.funding) {
+        const rate = (sigs.funding.details as any)?.fundingRate as number;
+        if (rate !== undefined) {
+          // Yüksek pozitif funding = çok long açık → düşebilir
+          if (rate > 0.0003) { score -= 1; reasons++; }
+          // Negatif funding = çok short açık → çıkabilir
+          else if (rate < -0.0001) { score += 1; reasons++; }
+        }
+      }
+
+      // === L/S RATIO (herkes long'taysa → contrarian DOWN) ===
+      if (sigs.ls_ratio) {
+        const ls = (sigs.ls_ratio.details as any)?.globalLS as number;
+        if (ls !== undefined) {
+          if (ls > 1.3) { score -= 1; } // çok long → düşebilir
+          else if (ls < 0.7) { score += 1; } // çok short → çıkabilir
+        }
+      }
+
+      // === PM FİYAT BİLGİSİ (market ne diyor) ===
+      // PM 55c+ bir yöne bakıyorsa hafif güven
+      if (upPrice > 0.58) score += 1;
+      else if (downPrice > 0.58) score -= 1;
+
+      // === KARAR ===
+      // En az 3 sinyal oy vermeli
+      if (reasons < 2) return { decision: 'SKIP', betPct: 0 };
+
+      // Yön ve güç
+      const dir = score > 0 ? 'UP' : 'DOWN';
+      const strength = Math.abs(score);
+
+      // Güç bazlı bet boyutu: zayıf = %1, güçlü = %3
+      let betPct = 0.01;
+      if (strength >= 5) betPct = 0.02;
+      if (strength >= 8) betPct = 0.03;
+
+      // Fiyat kontrolü — 30-70c arası
+      const price = dir === 'UP' ? upPrice : downPrice;
+      if (price < 0.25 || price > 0.75) return { decision: 'SKIP', betPct: 0 };
+
+      // Çok zayıfsa girme
+      if (strength < 3) return { decision: 'SKIP', betPct: 0 };
+
+      return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct };
+    },
+    shouldExit() {
+      // Sonuna kadar tut — binary market
+      return null;
+    },
+  },
 ];
 
 // ===== OPEN POSITIONS =====
