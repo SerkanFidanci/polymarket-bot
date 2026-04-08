@@ -35,7 +35,7 @@ export function PolymarketPanel({ round, live }: { round: PMRound | null; live: 
     };
 
     fetchPrices();
-    const id = setInterval(fetchPrices, 3000);
+    const id = setInterval(fetchPrices, 2000);
     return () => clearInterval(id);
   }, [round?.slug]);
 
