@@ -220,6 +220,8 @@ export function initDatabase(): void {
 
   // Migrations — add columns if missing
   try { db.exec(`ALTER TABLE training_rounds ADD COLUMN polymarket_fee_rate REAL`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE strategy_trades ADD COLUMN entry_time TEXT`); } catch { /* exists */ }
+  try { db.exec(`ALTER TABLE strategy_trades ADD COLUMN exit_time TEXT`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE paper_trades ADD COLUMN exit_reason TEXT`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE training_rounds ADD COLUMN exit_reason TEXT`); } catch { /* exists */ }
   try { db.exec(`ALTER TABLE training_rounds ADD COLUMN exit_price REAL`); } catch { /* exists */ }

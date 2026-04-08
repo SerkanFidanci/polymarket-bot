@@ -19,6 +19,7 @@ interface OpenPos {
   betSize: number;
   peakPrice: number;
   roundEndTime: number;
+  entryTime: string; // ISO timestamp of actual entry moment
 }
 
 interface ExitResult {
@@ -346,6 +347,7 @@ export const strategyManager = {
         betSize: Math.round(betSize * 100) / 100,
         peakPrice: entryPrice,
         roundEndTime: ctx.roundEndTime,
+        entryTime: new Date().toISOString(),
       });
 
       console.log(`[Strategy:${strat.name}] ENTER ${dir} @${(entryPrice * 100).toFixed(0)}¢ $${betSize.toFixed(2)}`);
@@ -447,11 +449,12 @@ function closePosition(stratName: string, pos: OpenPos, exitPrice: number, reaso
   const shares = pos.betSize / pos.entryPrice;
   const pnl = (exitPrice - pos.entryPrice) * shares;
 
-  // Save trade
+  // Save trade with real entry/exit timestamps
+  const exitTime = new Date().toISOString();
   db.prepare(`
-    INSERT INTO strategy_trades (round_id, strategy_name, decision, entry_price, bet_size, exit_price, exit_reason, pnl, actual_result)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(pos.roundId, stratName, 'BUY_' + pos.direction, pos.entryPrice, pos.betSize, exitPrice, reason, pnl, actualResult);
+    INSERT INTO strategy_trades (round_id, strategy_name, decision, entry_price, bet_size, exit_price, exit_reason, pnl, actual_result, entry_time, exit_time)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(pos.roundId, stratName, 'BUY_' + pos.direction, pos.entryPrice, pos.betSize, exitPrice, reason, pnl, actualResult, pos.entryTime, exitTime);
 
   // Update balance
   ensureBalance(stratName);
