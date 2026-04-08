@@ -126,10 +126,20 @@ export function useApiData() {
     }
   }, []);
 
-  // Fast poll: live-data only (prices) every 2s
+  // Fast poll: live-data (prices + slug change detection) every 1s
+  const lastSlugRef = { current: '' };
   const refreshPrices = useCallback(async () => {
     const liveData = await fetchJson<LiveData>('/api/live-data');
-    if (liveData) setLive(liveData);
+    if (liveData) {
+      setLive(liveData);
+      // Slug changed → new round, fetch round data immediately
+      const newSlug = liveData.training.currentSlug;
+      if (newSlug && newSlug !== lastSlugRef.current && lastSlugRef.current !== '') {
+        const roundData = await fetchJson<PMRound>('/api/polymarket/current-round');
+        if (roundData && roundData.found !== false) setRound(roundData);
+      }
+      if (newSlug) lastSlugRef.current = newSlug;
+    }
   }, []);
 
   useEffect(() => {
