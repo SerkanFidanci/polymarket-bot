@@ -72,8 +72,8 @@ export function detectSpike(windowSec: number = 10): { isSpike: boolean; directi
   const btc = getBtcMomentum(windowSec);
   if (!btc) return { isSpike: false, direction: 'UP', magnitude: 0 };
 
-  // Spike: %0.15+ hareket 10 saniyede (BTC $70K'da ~$105)
-  const isSpike = Math.abs(btc.changePct) > 0.15;
+  // Spike: %0.08+ hareket 10 saniyede (BTC $71K'da ~$57)
+  const isSpike = Math.abs(btc.changePct) > 0.08;
   return {
     isSpike,
     direction: btc.changePct > 0 ? 'UP' : 'DOWN',
@@ -91,8 +91,8 @@ export function detectOracleLag(): { hasLag: boolean; btcDirection: 'UP' | 'DOWN
   if (!btc30 || !pm30) return { hasLag: false, btcDirection: 'UP', lagAmount: 0, confidence: 0 };
 
   // BTC hareket etti ama PM aynı yönde yeterince hareket etmediyse
-  const btcMoved = Math.abs(btc30.changePct) > 0.1; // BTC %0.1+ hareket
-  const pmLagging = Math.abs(pm30.change) < 0.05; // PM 5c'den az değişti
+  const btcMoved = Math.abs(btc30.changePct) > 0.05; // BTC %0.05+ hareket (~$35)
+  const pmLagging = Math.abs(pm30.change) < 0.08; // PM 8c'den az değişti
 
   if (btcMoved && pmLagging) {
     return {

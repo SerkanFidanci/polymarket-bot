@@ -254,32 +254,31 @@ const STRATEGIES: Array<{
 
       // Oracle lag: BTC hareket etti ama PM henüz yansıtmadı
       const lag = detectOracleLag();
-      if (lag.hasLag && lag.confidence > 30) {
+      if (lag.hasLag && lag.confidence > 15) {
         const dir = lag.btcDirection;
         const price = dir === 'UP' ? upPrice : downPrice;
-        if (price >= 0.30 && price <= 0.65) {
+        if (price >= 0.25 && price <= 0.70) {
           return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
         }
       }
 
-      // Spike: BTC ani hareket (>%0.15 in 10s)
+      // Spike: BTC ani hareket (>%0.08 in 10s — ~$57)
       const spike = detectSpike(10);
-      if (spike.isSpike && spike.magnitude > 0.15) {
+      if (spike.isSpike || spike.magnitude > 0.08) {
         const dir = spike.direction;
         const price = dir === 'UP' ? upPrice : downPrice;
-        if (price >= 0.30 && price <= 0.60) {
+        if (price >= 0.25 && price <= 0.65) {
           return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
         }
       }
 
-      // Güçlü BTC momentum (30s'de %0.1+)
+      // BTC momentum (30s'de %0.05+ — ~$35)
       const btcMom = getBtcMomentum(30);
-      if (btcMom && Math.abs(btcMom.changePct) > 0.10) {
+      if (btcMom && Math.abs(btcMom.changePct) > 0.05) {
         const dir = btcMom.changePct > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
-        if (price >= 0.30 && price <= 0.55) {
-          // Sinyal de aynı yönde mi? Bonus güven
-          const sigAgree = (dir === 'UP' && signal.finalScore > 5) || (dir === 'DOWN' && signal.finalScore < -5);
+        if (price >= 0.30 && price <= 0.60) {
+          const sigAgree = (dir === 'UP' && signal.finalScore > 0) || (dir === 'DOWN' && signal.finalScore < 0);
           if (sigAgree) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.02 };
         }
       }
