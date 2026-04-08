@@ -452,8 +452,12 @@ async function pollRound(): Promise<void> {
       // (snapshot is taken at 60s, so allow joining up to 120s late)
       if (roundLateBy > 120) {
         console.log(`[TrainingLoop] Skipping round ${round.slug} — joined ${roundLateBy.toFixed(0)}s late (>120s threshold)`);
-        currentSlug = round.slug; // mark as seen so we don't re-process
-        startSignalSnapshot = null; // no snapshot = won't save this round
+        currentSlug = round.slug;
+        currentTokenIdUp = round.tokenIdUp;   // still need for price refresh
+        currentTokenIdDown = round.tokenIdDown;
+        roundUpPrice = round.priceUp;
+        roundDownPrice = round.priceDown;
+        startSignalSnapshot = null;
         return;
       }
 
