@@ -262,9 +262,9 @@ const STRATEGIES: Array<{
         }
       }
 
-      // Spike: BTC ani hareket (>%0.08 in 10s — ~$57)
+      // Spike: BTC ani hareket (>%0.02 in 10s — ~$14)
       const spike = detectSpike(10);
-      if (spike.isSpike || spike.magnitude > 0.08) {
+      if (spike.isSpike) {
         const dir = spike.direction;
         const price = dir === 'UP' ? upPrice : downPrice;
         if (price >= 0.25 && price <= 0.65) {
@@ -272,9 +272,9 @@ const STRATEGIES: Array<{
         }
       }
 
-      // BTC momentum (30s'de %0.05+ — ~$35)
+      // BTC momentum (30s'de %0.015+ — ~$10)
       const btcMom = getBtcMomentum(30);
-      if (btcMom && Math.abs(btcMom.changePct) > 0.05) {
+      if (btcMom && Math.abs(btcMom.changePct) > 0.015) {
         const dir = btcMom.changePct > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
         if (price >= 0.30 && price <= 0.60) {
