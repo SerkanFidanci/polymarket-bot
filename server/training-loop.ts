@@ -8,6 +8,7 @@ import type { SignalAccuracy } from '../src/types/signals.js';
 import { evaluateExitConditions, recordBtcPrice, type OpenPosition } from './exit-manager.js';
 import { EXIT_CHECK_INTERVAL } from '../src/utils/constants.js';
 import { strategyManager, setGlobalPrices } from './strategy-manager.js';
+import { recordBtcTick, recordPmTick, getAllMetrics } from './momentum-tracker.js';
 
 let trainingInterval: ReturnType<typeof setInterval> | null = null;
 let roundCounter = getRoundCountFromDB();
@@ -661,6 +662,10 @@ export const serverTrainingLoop = {
 
     // CLOB price refresh — every 500ms (single source of truth for entire system)
     setInterval(async () => {
+      // Record BTC tick for momentum tracking
+      const btcPrice = serverBinanceWS.lastTradePrice;
+      if (btcPrice > 0) recordBtcTick(btcPrice);
+
       if (currentTokenIdUp && currentTokenIdDown) {
         try {
           const prices = await refreshPrices(currentTokenIdUp, currentTokenIdDown, currentSlug);
@@ -668,6 +673,8 @@ export const serverTrainingLoop = {
             roundUpPrice = prices.priceUp;
             roundDownPrice = prices.priceDown;
             setGlobalPrices(roundUpPrice, roundDownPrice);
+            // Record PM tick for momentum tracking
+            recordPmTick(roundUpPrice);
           }
         } catch { /* silent */ }
       }
