@@ -378,7 +378,7 @@ async function pollRound(): Promise<void> {
 
         // Entry price floor: data shows <30c = 0% WR
         const entryPrice = dir === 'UP' ? roundUpPriceAtStart : roundDownPriceAtStart;
-        const priceInRange = entryPrice >= 0.30 && entryPrice <= 0.52; // 30-52c: EV positive zone (>52c fee kills edge)
+        const priceInRange = entryPrice >= 0.30 && entryPrice <= 0.58; // 30-58c (was 52c, too tight — missed 54% of rounds)
 
         if (pricesValid && priceInRange && !balanceStopLoss && !dailyStopLoss && Math.abs(score) > minScoreForDir && conf > 15 && confNotOverfit && feeOk && spreadOk) {
           hypDecision = score > 0 ? 'BUY_UP' : 'BUY_DOWN';
