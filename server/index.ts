@@ -481,7 +481,7 @@ app.get('/api/trades/detailed', (_req, res) => {
 
     // Strategy trades with round data
     const strategies = db.prepare(`
-      SELECT st.id, st.created_at as time, tr.round_end_time as end_time,
+      SELECT st.id, tr.round_start_time as time, tr.round_end_time as end_time,
         st.strategy_name as strategy,
         st.decision, st.actual_result, st.pnl, st.bet_size, 0 as ev,
         tr.polymarket_up_price as pm_up, tr.polymarket_down_price as pm_down,
