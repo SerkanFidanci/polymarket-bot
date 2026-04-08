@@ -56,6 +56,9 @@ const STRATEGIES: Array<{
       const absScore = Math.abs(signal.finalScore);
       if (absScore > 15 && signal.confidence > 20) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
+        // Direction-specific threshold: BUY_UP has 36% WR vs BUY_DOWN 52% WR
+        // Require stronger signal for UP to filter out weak longs
+        if (dir === 'UP' && absScore <= 25) return { decision: 'SKIP', betPct: 0 };
         const price = dir === 'UP' ? upPrice : downPrice;
         if (price < 0.30) return { decision: 'SKIP', betPct: 0 }; // data: <30c = 0% WR
         const prob = Math.min(0.85, 0.5 + absScore / 200);
@@ -87,9 +90,10 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(_pos, tokenPrice) {
-      // Only absolute floor — no trailing stop (kills binary market winners)
-      if (tokenPrice < 0.05) return { shouldExit: true, reason: 'abs_floor_5c', exitPrice: tokenPrice };
+    shouldExit() {
+      // Hold to expiry — abs_floor_5c stop-loss destroyed $13.62 of value:
+      // 6 of 7 triggered exits would have won at expiry. Binary tokens dip
+      // mid-round then recover; any early exit panics on temporary noise.
       return null;
     },
   },
@@ -109,11 +113,9 @@ const STRATEGIES: Array<{
       if (!signal || upPrice < 0.05 || downPrice < 0.05) return { decision: 'SKIP', betPct: 0 };
       const emaMacd = signal.signals.ema_macd;
       const vwapBb = signal.signals.vwap_bb;
-      const trendAligned = emaMacd && vwapBb
-        && Math.sign(emaMacd.score) === Math.sign(signal.finalScore)
-        && Math.sign(vwapBb.score) === Math.sign(signal.finalScore)
-        && Math.abs(emaMacd.score) > 15
-        && signal.confidence > 25;
+      const emaAligned = emaMacd && Math.sign(emaMacd.score) === Math.sign(signal.finalScore) && Math.abs(emaMacd.score) > 15;
+      const vwapAligned = vwapBb && Math.sign(vwapBb.score) === Math.sign(signal.finalScore) && Math.abs(vwapBb.score) > 15;
+      const trendAligned = (emaAligned || vwapAligned) && signal.confidence > 25;
       if (trendAligned) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
@@ -151,7 +153,7 @@ const STRATEGIES: Array<{
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(_pos, _tokenPrice, timeLeftSec) {
-      if (timeLeftSec <= 15) return { shouldExit: true, reason: 'time_15s_exit', exitPrice: _tokenPrice };
+      if (timeLeftSec <= 20) return { shouldExit: true, reason: 'time_20s_exit', exitPrice: _tokenPrice };
       return null;
     },
   },
