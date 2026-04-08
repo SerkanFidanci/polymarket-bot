@@ -74,8 +74,7 @@ const STRATEGIES: Array<{
     },
   },
   {
-    // 2. SELECTIVE — high quality, hold to expiry (no trailing stop)
-    // CHANGED: score 25→20, conf 35→30, cap 50→55, trailing stop REMOVED, abs floor 5c added
+    // 2. SELECTIVE — high quality, hold to expiry, DOWN only
     name: 'SELECTIVE',
     shouldEnter(ctx) {
       const { signal, upPrice, downPrice } = ctx;
@@ -83,10 +82,13 @@ const STRATEGIES: Array<{
       const absScore = Math.abs(signal.finalScore);
       if (absScore > 20 && signal.confidence > 30 && signal.confidence <= 55) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
-        const price = dir === 'UP' ? upPrice : downPrice;
+        // Only BUY_DOWN — UP signals consistently lose across all strategies
+        if (dir === 'UP') return { decision: 'SKIP', betPct: 0 };
+        const price = downPrice;
+        if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 }; // price floor
         const prob = Math.min(0.85, 0.5 + absScore / 200);
         const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
-        if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.05 };
+        if (ev > 0) return { decision: 'BUY_DOWN', betPct: 0.05 };
       }
       return { decision: 'SKIP', betPct: 0 };
     },
@@ -148,6 +150,8 @@ const STRATEGIES: Array<{
       const absScore = Math.abs(signal.finalScore);
       if (absScore > 12 && signal.confidence > 15) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
+        // BUY_UP needs much higher score — UP loses -$5.60 vs DOWN +$2.80
+        if (dir === 'UP' && absScore <= 25) return { decision: 'SKIP', betPct: 0 };
         return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.03 };
       }
       return { decision: 'SKIP', betPct: 0 };
