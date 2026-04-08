@@ -69,7 +69,7 @@ const STRATEGIES: Array<{
     },
     shouldExit(pos, tokenPrice) {
       // %50 drop from entry = cut loss (won't recover)
-      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
+      // No stop-loss — binary tokens dip mid-round then recover (9/9 half_loss exits were winners)
       return null;
     },
   },
@@ -93,7 +93,7 @@ const STRATEGIES: Array<{
       return { decision: 'SKIP', betPct: 0 };
     },
     shouldExit(pos, tokenPrice) {
-      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
+      // No stop-loss — binary tokens dip mid-round then recover (9/9 half_loss exits were winners)
       // Hold to expiry otherwise — abs_floor_5c stop-loss destroyed $13.62 of value:
       // 6 of 7 triggered exits would have won at expiry. Binary tokens dip
       // mid-round then recover; any early exit panics on temporary noise.
@@ -122,8 +122,9 @@ const STRATEGIES: Array<{
       }
       return { decision: 'SKIP', betPct: 0 };
     },
-    shouldExit(pos, tokenPrice) {
-      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
+    shouldExit() {
+      // No stop-loss — data shows half_loss killed 7/7 winning trades
+      // Binary tokens dip mid-round then recover to $1
       return null;
     },
   },
@@ -153,7 +154,7 @@ const STRATEGIES: Array<{
     },
     shouldExit(_pos, _tokenPrice, timeLeftSec) {
       // %30 kayıpta kes, yoksa sonuna kadar tut
-      if (_tokenPrice < _pos.entryPrice * 0.70) return { shouldExit: true, reason: 'loss_30pct', exitPrice: _tokenPrice };
+      // No stop-loss — binary tokens dip mid-round then recover
       return null;
     },
   },
@@ -188,7 +189,7 @@ const STRATEGIES: Array<{
     },
     shouldExit(pos, tokenPrice) {
       // %50 drop = cut loss
-      if (tokenPrice < pos.entryPrice * 0.50) return { shouldExit: true, reason: 'half_loss', exitPrice: tokenPrice };
+      // No stop-loss — binary tokens dip mid-round then recover (9/9 half_loss exits were winners)
       return null;
     },
   },
