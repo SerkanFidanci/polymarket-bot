@@ -285,8 +285,31 @@ const STRATEGIES: Array<{
 
       return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct };
     },
-    shouldExit() {
-      // Sonuna kadar tut — binary market
+    shouldExit(pos, tokenPrice, _timeLeftSec, signal) {
+      if (!signal) return null;
+
+      // Sinyaller ters mi döndü? Giriş yönünün tersine güçlü sinyal varsa çık
+      const isUp = pos.direction === 'UP';
+      const liveScore = signal.finalScore;
+
+      // UP aldık ama sinyal artık güçlü DOWN gösteriyorsa → çık
+      if (isUp && liveScore < -15) {
+        return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+      }
+      // DOWN aldık ama sinyal artık güçlü UP gösteriyorsa → çık
+      if (!isUp && liveScore > 15) {
+        return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+      }
+
+      // Token fiyatı giriş fiyatının %40 altına düştüyse VE sinyal de aynı yönde değilse → çık
+      if (tokenPrice < pos.entryPrice * 0.60) {
+        // Sinyal hala bizim yöndeyse tut (toparlanabilir)
+        const stillOurWay = (isUp && liveScore > 5) || (!isUp && liveScore < -5);
+        if (!stillOurWay) {
+          return { shouldExit: true, reason: 'dropping_no_support', exitPrice: tokenPrice };
+        }
+      }
+
       return null;
     },
   },
