@@ -93,7 +93,7 @@ async function runAccuracyCheck() {
   console.log(`[TrainingLoop] Accuracy check (${rounds.length} rounds): ${accuracies.map(a => `${a.signalName}:${(a.accuracy * 100).toFixed(1)}%`).join(', ')}`);
 
   // Auto-rebalance weights based on accuracy
-  // <48% = harmful (0.01), 48-53% = neutral (0.03), >53% = good (accuracy value)
+  // <47% = harmful → KILL (0), 47-52% = minimal (0.01), >52% = good (accuracy value)
   const newWeights: Record<string, number> = {};
   let sum = 0;
   for (const acc of accuracies) {
@@ -102,8 +102,8 @@ async function runAccuracyCheck() {
     if (acc.totalPredictions < 10) { newWeights[name] = currentWeights[name]; sum += currentWeights[name]; continue; }
 
     let w: number;
-    if (acc.accuracy < 0.48) w = 0.01;
-    else if (acc.accuracy < 0.53) w = 0.03;
+    if (acc.accuracy < 0.47) w = 0;       // zararlı → tamamen kapat
+    else if (acc.accuracy < 0.52) w = 0.01; // minimal
     else w = acc.accuracy;
     newWeights[name] = w;
     sum += w;
