@@ -114,6 +114,7 @@ const STRATEGIES: Array<{
       if (trendAligned) {
         const dir = signal.finalScore > 0 ? 'UP' : 'DOWN';
         const price = dir === 'UP' ? upPrice : downPrice;
+        if (price < 0.30 || price > 0.70) return { decision: 'SKIP', betPct: 0 }; // 30-70c only
         const prob = Math.min(0.85, 0.5 + Math.abs(signal.finalScore) / 200);
         const ev = (prob * (1 - price)) - ((1 - prob) * price) - ctx.feeRate;
         if (ev > 0) return { decision: dir === 'UP' ? 'BUY_UP' : 'BUY_DOWN', betPct: 0.04 };
