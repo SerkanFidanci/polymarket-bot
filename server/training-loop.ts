@@ -620,7 +620,7 @@ export const serverTrainingLoop = {
     // Start polling every 10 seconds
     console.log('[TrainingLoop] Starting round polling (10s interval)');
     pollRound();
-    trainingInterval = setInterval(pollRound, 10000);
+    trainingInterval = setInterval(pollRound, 5000);
 
     // Start exit monitoring (checks every 5s)
     startExitMonitoring();
