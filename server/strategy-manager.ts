@@ -44,15 +44,37 @@ interface RoundContext {
   timeIntoRound: number; // seconds since round start
 }
 
+// Track sustained signal reversals per strategy
+const reversalTracker = new Map<string, { startTime: number; count: number }>();
+
 // ===== SHARED EXIT: signal_reversed (works on all strategies) =====
 function smartExit(pos: OpenPos, tokenPrice: number, signal: CombinedSignal | null): ExitResult | null {
   if (!signal) return null;
   const isUp = pos.direction === 'UP';
   const sc = signal.finalScore;
 
-  // Sinyal güçlü ters yöne döndüyse → çık (eşik 30 — sadece çok güçlü dönüşlerde)
-  if (isUp && sc < -30) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
-  if (!isUp && sc > 30) return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+  // Sinyal ters mi? (eşik 25)
+  const isReversed = (isUp && sc < -25) || (!isUp && sc > 25);
+  const key = pos.strategyName + '_' + pos.roundId;
+
+  if (isReversed) {
+    const tracker = reversalTracker.get(key);
+    if (!tracker) {
+      // İlk ters tick — sayacı başlat
+      reversalTracker.set(key, { startTime: Date.now(), count: 1 });
+    } else {
+      tracker.count++;
+      const duration = (Date.now() - tracker.startTime) / 1000;
+      // 15 saniye+ ters kaldıysa → gerçek dönüş, çık
+      if (duration >= 15 && tracker.count >= 3) {
+        reversalTracker.delete(key);
+        return { shouldExit: true, reason: 'signal_reversed', exitPrice: tokenPrice };
+      }
+    }
+  } else {
+    // Sinyal geri döndü — sayacı sıfırla
+    reversalTracker.delete(key);
+  }
 
   // %40+ düştü VE sinyal desteklemiyor → çık
   if (tokenPrice < pos.entryPrice * 0.60) {
@@ -384,6 +406,7 @@ export const strategyManager = {
     // Clear all positions and round locks
     openPositions.clear();
     tradedThisRound.clear();
+    reversalTracker.clear();
   },
 
   getLeaderboard(): Array<{
