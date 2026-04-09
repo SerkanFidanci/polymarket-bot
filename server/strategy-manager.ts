@@ -384,7 +384,7 @@ export const strategyManager = {
 
       const exitResult = strat.shouldExit(pos, currentToken, timeLeftSec, signal);
       if (exitResult && exitResult.shouldExit) {
-        closePosition(strat.name, pos, exitResult.exitPrice, exitResult.reason, pos.direction);
+        closePosition(strat.name, pos, exitResult.exitPrice, exitResult.reason, 'EARLY_EXIT');
       }
     }
   },
