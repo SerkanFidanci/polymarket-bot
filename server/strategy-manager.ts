@@ -76,11 +76,8 @@ function smartExit(pos: OpenPos, tokenPrice: number, signal: CombinedSignal | nu
     reversalTracker.delete(key);
   }
 
-  // %40+ düştü VE sinyal desteklemiyor → çık
-  if (tokenPrice < pos.entryPrice * 0.60) {
-    const stillOk = (isUp && sc > 5) || (!isUp && sc < -5);
-    if (!stillOk) return { shouldExit: true, reason: 'dropping_no_support', exitPrice: tokenPrice };
-  }
+  // dropping_no_support KALDIRILDI — son 21 trade'de 0 WIN, -$16.34
+  // Binary token'lar %40 düşüp sonra $1 olabiliyor
 
   // trend_against KALDIRILDI — 31 trade'de $13.52 zarar etti
   // binary token'lar trend'e rağmen toparlanabiliyor
