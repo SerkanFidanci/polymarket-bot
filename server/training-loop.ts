@@ -96,8 +96,10 @@ async function runAccuracyCheck() {
 
   console.log(`[TrainingLoop] Accuracy check (${rounds.length} rounds): ${accuracies.map(a => `${a.signalName}:${(a.accuracy * 100).toFixed(1)}%`).join(', ')}`);
 
-  // Auto-rebalance weights based on accuracy
-  // <47% = harmful → KILL (0), 47-52% = minimal (0.01), >52% = good (accuracy value)
+  // Auto-rebalance KAPALI — ağırlıklar manuel yönetiliyor
+  // Sebebi: auto-rebalance eski veriye bakıp iyi sinyalleri cezalıyordu
+  // (orderbook %61 ama %0.6 ağırlık verilmişti)
+  /*
   const newWeights: Record<string, number> = {};
   let sum = 0;
   for (const acc of accuracies) {
@@ -135,6 +137,7 @@ async function runAccuracyCheck() {
     );
     console.log(`[TrainingLoop] Weights auto-updated. Top: ${Object.entries(newWeights).sort((a,b)=>b[1]-a[1]).slice(0,4).map(([k,v])=>k+':'+(v*100).toFixed(0)+'%').join(', ')}`);
   }
+  */ // auto-rebalance kapalı
 }
 
 async function runFullOptimization() {

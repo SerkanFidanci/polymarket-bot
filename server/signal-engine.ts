@@ -52,17 +52,25 @@ function computeAllSignals(): Record<SignalName, SignalResult> {
   if (priceHistory5m.length > 60) priceHistory5m.shift();
   const price5mAgo = priceHistory5m.length > 5 ? priceHistory5m[priceHistory5m.length - 6]! : currentPrice;
 
+  const cvdRaw = calculateCvdSignal(recentTrades2m, currentPrice);
+  const lsRaw = calculateLsRatioSignal(futuresData);
+
+  // CVD TERS ÇEVİR: %31 accuracy = %69 ters doğruluk. Contrarian sinyal.
+  // ls_ratio TERS ÇEVİR: %43 accuracy = %57 ters. Crowd contrarian.
+  cvdRaw.score = -cvdRaw.score;
+  lsRaw.score = -lsRaw.score;
+
   return {
     orderbook: calculateOrderBookSignal(serverBinanceWS.orderBook),
     ema_macd: calculateEmaMacdSignal(closes),
     rsi_stoch: calculateRsiStochSignal(closes),
     vwap_bb: calculateVwapBollingerSignal(closes, volumes, currentPrice),
-    cvd: calculateCvdSignal(recentTrades2m, currentPrice),
+    cvd: cvdRaw,
     whale: calculateWhaleSignal(recentTrades2m),
     funding: calculateFundingRateSignal(futuresData),
     open_interest: calculateOpenInterestSignal(futuresData, currentPrice, price5mAgo),
     liquidation: calculateLiquidationSignal(recentLiqs2m),
-    ls_ratio: calculateLsRatioSignal(futuresData),
+    ls_ratio: lsRaw,
   };
 }
 
