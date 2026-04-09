@@ -83,7 +83,9 @@ function logOptimizationToDB(
 }
 
 async function runAccuracyCheck() {
-  const rounds = getAllTrainingRounds();
+  // Son 200 round kullan — eski veriye çok ağırlık vermemek için
+  const allRounds = getAllTrainingRounds();
+  const rounds = allRounds.slice(-200);
   if (rounds.length < 20) return;
 
   const currentWeights = serverSignalEngine.getWeights();
