@@ -60,12 +60,8 @@ function smartExit(pos: OpenPos, tokenPrice: number, signal: CombinedSignal | nu
     if (!stillOk) return { shouldExit: true, reason: 'dropping_no_support', exitPrice: tokenPrice };
   }
 
-  // Multi-timeframe trend bizim ters yöndeyse + token düşüyorsa → çık
-  const ctx = getMarketContext();
-  if (ctx.trendsAgree && tokenPrice < pos.entryPrice * 0.80) {
-    const trendAgainst = (isUp && ctx.trendDirection === 'DOWN') || (!isUp && ctx.trendDirection === 'UP');
-    if (trendAgainst) return { shouldExit: true, reason: 'trend_against', exitPrice: tokenPrice };
-  }
+  // trend_against KALDIRILDI — 31 trade'de $13.52 zarar etti
+  // binary token'lar trend'e rağmen toparlanabiliyor
 
   return null;
 }
