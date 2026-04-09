@@ -527,7 +527,7 @@ async function pollRound(): Promise<void> {
       snapshotTaken = false;
       if (snapshotTimer) clearTimeout(snapshotTimer);
 
-      const delayMs = Math.max(0, 60000 - (roundLateBy * 1000)); // 60s minus how late we joined
+      const delayMs = Math.max(0, 120000 - (roundLateBy * 1000)); // 120s — EMA %66 vs %53 at 60s
       snapshotTimer = setTimeout(() => {
         startSignalSnapshot = serverSignalEngine.getLastSignal();
         snapshotTaken = true;
